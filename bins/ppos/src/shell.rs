@@ -1,5 +1,6 @@
 use alloc::boxed::Box;
 use cpio::CPIOArchive;
+use cpu::cpu;
 use library::{console, format, print, println, string::String};
 
 use crate::{
@@ -52,6 +53,7 @@ impl Shell {
         println!("info\t: get hardware infomation");
         println!("ls\t: list files");
         println!("cat\t: show file content");
+        println!("run-program\t: run a program (image)");
     }
 
     fn reboot(&self) {
@@ -87,6 +89,7 @@ impl Shell {
                 "info" => self.info(),
                 "ls" => self.ls(),
                 "cat" => self.cat(args),
+                "run-program" => self.run_program(args),
                 "" => (),
                 cmd => println!("{}: command not found", cmd),
             }
@@ -156,6 +159,42 @@ impl Shell {
                         }
                     }
                     println!("cat: {}: No such file or directory", filename);
+                    return Ok(());
+                }
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    fn run_program(&self, args: Box<[&str]>) {
+        if args.len() != 1 {
+            println!("Usage: run-program <file>");
+            return;
+        }
+
+        let t = format!("{}\0", args[0]);
+        let filename = t.as_str();
+        let mut devicetree =
+            unsafe { devicetree::FlattenedDevicetree::from_memory(memory::DEVICETREE_START_ADDR) };
+        devicetree
+            .traverse(&move |device_name, property_name, property_value| {
+                if property_name == "linux,initrd-start" {
+                    let mut cpio_archive = unsafe {
+                        CPIOArchive::from_memory(u32::from_be_bytes(
+                            property_value.try_into().unwrap(),
+                        ) as usize)
+                    };
+                    while let Some(file) = cpio_archive.read_next() {
+                        if file.name != filename {
+                            continue;
+                        }
+                        const STACK_SIZE: usize = 0x1000;
+                        let stack = Box::new([0u8; STACK_SIZE]);
+                        let stack_end = stack.as_ptr() as u64 + STACK_SIZE as u64;
+                        println!("{:#018x}", file.content.as_ptr() as u64);
+                        unsafe { cpu::run_user_code(stack_end, file.content.as_ptr() as u64) };
+                    }
+                    println!("run-program: {}: No such file or directory", filename);
                     return Ok(());
                 }
                 Ok(())
