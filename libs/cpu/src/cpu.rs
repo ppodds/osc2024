@@ -12,6 +12,7 @@ pub fn spin_for_cycle(cycle: usize) {
 
 #[inline(always)]
 pub unsafe fn switch_to_el1(stack_end: u64, kernel_init_fn: unsafe fn() -> !) -> ! {
+    HCR_EL2.write(HCR_EL2::RW::EL1IsAarch64);
     SPSR_EL2.write(
         SPSR_EL2::D::Masked
             + SPSR_EL2::A::Masked

@@ -4,14 +4,12 @@
 extern crate alloc;
 
 mod driver;
+mod exception;
 mod memory;
 mod shell;
 
 use core::{arch::global_asm, panic::PanicInfo};
-use cpu::{
-    cpu::switch_to_el1,
-    exception::{self},
-};
+use cpu::cpu::switch_to_el1;
 use library::println;
 use shell::Shell;
 
