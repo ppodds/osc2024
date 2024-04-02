@@ -9,7 +9,7 @@ mod memory;
 mod shell;
 
 use core::{arch::global_asm, panic::PanicInfo};
-use cpu::cpu::switch_to_el1;
+use cpu::cpu::{enable_kernel_space_interrupt, switch_to_el1};
 use library::println;
 use shell::Shell;
 
@@ -28,6 +28,7 @@ pub unsafe extern "C" fn _start_rust(devicetree_start_addr: usize) -> ! {
 unsafe fn kernel_init() -> ! {
     exception::handling_init();
     driver::init().unwrap();
+    enable_kernel_space_interrupt();
     kernel_start();
 }
 

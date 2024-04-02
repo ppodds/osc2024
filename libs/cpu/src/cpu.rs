@@ -38,3 +38,13 @@ pub unsafe fn run_user_code(stack_end: u64, code_start: u64) {
     SP_EL0.set(stack_end);
     eret();
 }
+
+#[inline(always)]
+pub unsafe fn enable_kernel_space_interrupt() {
+    DAIF.write(DAIF::I::Unmasked);
+}
+
+#[inline(always)]
+pub unsafe fn disable_kernel_space_interrupt() {
+    DAIF.write(DAIF::I::Masked);
+}

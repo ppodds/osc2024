@@ -4,6 +4,7 @@
 
 use aarch64_cpu::registers::*;
 use core::fmt;
+use device::interrupt_manager;
 use library::println;
 use tock_registers::{interfaces::Readable, registers::InMemoryRegister};
 
@@ -73,24 +74,12 @@ extern "C" fn current_el0_serror(_e: &mut ExceptionContext) {
 
 #[no_mangle]
 extern "C" fn current_elx_synchronous(e: &mut ExceptionContext) {
-    if e.fault_address_valid() {
-        let far_el1 = FAR_EL1.get();
-
-        // This catches the demo case for this tutorial. If the fault address happens to be 8 GiB,
-        // advance the exception link register for one instruction, so that execution can continue.
-        if far_el1 == 8 * 1024 * 1024 * 1024 {
-            e.elr_el1 += 4;
-
-            return;
-        }
-    }
-
     default_exception_handler(e);
 }
 
 #[no_mangle]
 extern "C" fn current_elx_irq(e: &mut ExceptionContext) {
-    default_exception_handler(e);
+    interrupt_manager::interrupt_manager().handle_pending_interrupt();
 }
 
 #[no_mangle]
