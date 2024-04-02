@@ -1,7 +1,7 @@
-use core::alloc::GlobalAlloc;
+use core::{alloc::GlobalAlloc, mem::align_of};
 
 use crate::memory;
-use library::sync::mutex::Mutex;
+use library::{println, sync::mutex::Mutex};
 
 #[global_allocator]
 static KERNEL_HEAP_ALLOCATOR: HeapAllocator = unsafe { HeapAllocator::new() };
@@ -24,6 +24,8 @@ impl HeapAllocatorInner {
         }
         let p = (Self::heap_start_addr() + self.current) as *mut u8;
         self.current += layout.size();
+        // align to 8 bytes
+        self.current += (self.current as *const u8).align_offset(align_of::<u64>());
         p
     }
 
