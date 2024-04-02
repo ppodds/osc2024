@@ -1,7 +1,7 @@
 use core::{alloc::GlobalAlloc, mem::align_of};
 
 use crate::memory;
-use library::{println, sync::mutex::Mutex};
+use library::sync::mutex::Mutex;
 
 #[global_allocator]
 static KERNEL_HEAP_ALLOCATOR: HeapAllocator = unsafe { HeapAllocator::new() };
