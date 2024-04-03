@@ -20,8 +20,10 @@ extern "C" {
     pub static __bss_end: usize;
     pub static __heap_begin: usize;
     pub static __heap_end: usize;
+    pub static PAGE_SIZE: usize;
 }
 
 pub static mut DEVICETREE_START_ADDR: usize = 0;
 
 pub mod heap_allocator;
+pub mod page_allocator;

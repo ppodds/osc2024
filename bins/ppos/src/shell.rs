@@ -9,7 +9,7 @@ use library::{console, format, print, println, sync::mutex::Mutex};
 
 use crate::{
     driver::{self, mailbox},
-    memory,
+    memory::{self, page_allocator},
 };
 
 pub struct Shell {
@@ -61,6 +61,7 @@ impl Shell {
         println!("run-program\t: run a program (image)");
         println!("switch-2s-alert\t: enable/disable 2s alert");
         println!("set-timeout\t: print a message after period of time");
+        println!("mem-test\t: test memory allocation");
     }
 
     fn reboot(&self) {
@@ -100,6 +101,7 @@ impl Shell {
                 "test" => self.test(),
                 "switch-2s-alert" => self.switch_2s_alert(),
                 "set-timeout" => self.set_timeout(args),
+                "mem-test" => self.mem_test(),
                 "" => (),
                 cmd => println!("{}: command not found", cmd),
             }
@@ -263,6 +265,10 @@ impl Shell {
                 Ok(())
             }),
         )
+    }
+
+    fn mem_test(&self) {
+        
     }
 }
 

@@ -11,6 +11,8 @@ mod shell;
 use core::{arch::global_asm, panic::PanicInfo};
 use cpu::cpu::{enable_kernel_space_interrupt, switch_to_el1};
 use library::println;
+use memory::page_allocator::{self, BuddyPageAllocator};
+use memory::page_allocator::{page_allocator, PageAllocator};
 use shell::Shell;
 
 global_asm!(include_str!("boot.s"));
@@ -24,11 +26,24 @@ pub unsafe extern "C" fn _start_rust(devicetree_start_addr: usize) -> ! {
         kernel_init,
     );
 }
-
+static PAGE_ALLOCATOR: BuddyPageAllocator = BuddyPageAllocator::new();
 unsafe fn kernel_init() -> ! {
     exception::handling_init();
     driver::init().unwrap();
     enable_kernel_space_interrupt();
+    let mut devicetree =
+        unsafe { devicetree::FlattenedDevicetree::from_memory(memory::DEVICETREE_START_ADDR) };
+    devicetree
+        .traverse(&move |device_name, property_name, property_value| {
+            if device_name == "memory@0" && property_name == "reg" {
+                let memory_end_addr = u64::from_be_bytes(property_value.try_into().unwrap());
+                PAGE_ALLOCATOR.init(0, memory_end_addr as usize)?;
+                page_allocator::register_page_allocator(&PAGE_ALLOCATOR);
+            }
+            Ok(())
+        })
+        .unwrap();
+    page_allocator::page_allocator().alloc_page(8192).unwrap();
     kernel_start();
 }
 
