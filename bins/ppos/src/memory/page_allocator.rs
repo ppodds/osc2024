@@ -1,61 +1,49 @@
-use core::{array, slice};
+use core::array;
 
-use alloc::{collections::LinkedList, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use library::{println, sync::mutex::Mutex};
 
 use crate::memory::PAGE_SIZE;
 
-pub unsafe trait PageAllocator {
-    unsafe fn init(&self, page_start_addr: usize, page_end_addr: usize)
-        -> Result<(), &'static str>;
-
-    /**
-     * Allocate a large size memory
-     * size should be align to page size
-     */
-    unsafe fn alloc_page(&self, size: usize) -> Result<usize, &'static str>;
-
-    unsafe fn free_page(&self, page_start_addr: usize);
+#[derive(Debug, Clone, PartialEq)]
+enum FrameStatus {
+    Free,
+    Allocated,
 }
 
-struct NullPageAllocator {}
+#[derive(Debug, Clone)]
+struct Frame {
+    index: usize,
+    status: FrameStatus,
+    order: usize,
+}
 
-impl NullPageAllocator {
-    const fn new() -> Self {
-        Self {}
+impl Frame {
+    pub const fn new(index: usize) -> Self {
+        Self {
+            index,
+            status: FrameStatus::Free,
+            order: 0,
+        }
     }
 }
 
-unsafe impl PageAllocator for NullPageAllocator {
-    unsafe fn init(
-        &self,
-        page_start_addr: usize,
-        page_end_addr: usize,
-    ) -> Result<(), &'static str> {
-        unimplemented!();
-    }
-
-    unsafe fn alloc_page(&self, size: usize) -> Result<usize, &'static str> {
-        unimplemented!();
-    }
-
-    unsafe fn free_page(&self, page_start_addr: usize) {
-        unimplemented!();
+impl PartialEq for Frame {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
     }
 }
 
 #[derive(Debug)]
 pub struct BuddyPageAllocator {
     // workaround
-    frame_free_list: Mutex<Option<[LinkedList<usize>; Self::MAX_PAGE_VAL + 1]>>,
-    status: Mutex<Vec<usize>>,
+    frame_free_list: Mutex<Option<[Vec<Arc<Mutex<Frame>>>; Self::MAX_ORDER + 1]>>,
+    status: Mutex<Vec<Arc<Mutex<Frame>>>>,
     boundary: Mutex<(usize, usize)>,
 }
 
 impl BuddyPageAllocator {
-    const MAX_PAGE_VAL: usize = 15;
-    const FREE_VAL: usize = usize::MAX - 1;
-    const ALLOCATED_VAL: usize = usize::MAX - 2;
+    const MAX_ORDER: usize = 11;
 
     pub const fn new() -> Self {
         Self {
@@ -77,7 +65,7 @@ impl BuddyPageAllocator {
 
     #[inline(always)]
     fn biggest_part_frame_amount() -> usize {
-        1 << Self::MAX_PAGE_VAL
+        1 << Self::MAX_ORDER
     }
 
     #[inline(always)]
@@ -86,13 +74,51 @@ impl BuddyPageAllocator {
     }
 
     #[inline(always)]
-    fn find_buddy_index(frame_index: usize, frame_val: usize) -> usize {
-        frame_index ^ (1 << frame_val)
+    fn find_buddy_index(frame: &Frame) -> usize {
+        frame.index ^ (1 << frame.order)
     }
-}
 
-unsafe impl PageAllocator for BuddyPageAllocator {
-    unsafe fn init(
+    fn merge_buddy(&self, frame: &mut Frame) {
+        if frame.order == Self::MAX_ORDER {
+            return;
+        }
+        let buddy_index = Self::find_buddy_index(frame);
+        println!("buddy index: {}", buddy_index);
+        let buddy_frame_mutex = &self.status.lock().unwrap()[buddy_index];
+        let buddy_frame = buddy_frame_mutex.lock().unwrap();
+        println!(
+            "frame order: {}, buddy order: {}",
+            frame.order, buddy_frame.order
+        );
+        if buddy_frame.status == FrameStatus::Allocated {
+            return;
+        }
+        if frame.order != buddy_frame.order {
+            return;
+        }
+        frame.order += 1;
+        let mut frame_free_list = self.frame_free_list.lock().unwrap();
+        let list_ins = &mut frame_free_list.as_mut().unwrap()[buddy_frame.order];
+        let mut buddy_index_in_free_list = 0;
+        // remove buddy from free list
+        // not found in free list in not take into account
+        for i in 0..list_ins.len() {
+            let f = list_ins[i].lock().unwrap();
+            if f.index == buddy_frame.index {
+                buddy_index_in_free_list = i;
+                println!("Remove buddy from free list. buddy index: {}", f.index);
+                break;
+            }
+        }
+        list_ins.swap_remove(buddy_index_in_free_list);
+        println!(
+            "Merge frame {} into frame {}. New val: {}",
+            buddy_index, frame.index, frame.order
+        );
+        self.merge_buddy(frame);
+    }
+
+    pub unsafe fn init(
         &self,
         page_start_addr: usize,
         page_end_addr: usize,
@@ -103,7 +129,7 @@ unsafe impl PageAllocator for BuddyPageAllocator {
             return Err("Page start / end address should be align to page size");
         }
         *self.boundary.lock().unwrap() = (page_start_addr, page_end_addr);
-        let mut frame_free_list = array::from_fn(|_| LinkedList::new());
+        let mut frame_free_list = array::from_fn(|_| Vec::new());
         let memory_total_size = page_end_addr - page_start_addr;
         println!(
             "Page allocatable memory total size: {} (reserved zone included)",
@@ -112,8 +138,12 @@ unsafe impl PageAllocator for BuddyPageAllocator {
         println!("Page size: {}", Self::page_size());
         let frame_amount = memory_total_size / Self::page_size();
         println!("Frame amount: {}", frame_amount);
+        // initialize status array
         let mut status = self.status.lock().unwrap();
-        status.resize(frame_amount, Self::FREE_VAL);
+        status.resize_with(frame_amount, || Arc::new(Mutex::new(Frame::new(0))));
+        for i in 0..status.len() {
+            status[i].lock().unwrap().index = i;
+        }
         let biggest_part_page_amount = Self::biggest_part_frame_amount();
         let biggest_part_size = Self::biggest_part_size();
         println!("Biggest part size: {}", biggest_part_size);
@@ -122,13 +152,14 @@ unsafe impl PageAllocator for BuddyPageAllocator {
         println!("Biggest part amount: {}", frame_amount_of_biggest_part);
         for i in 0..frame_amount_of_biggest_part {
             let page_frame_index = i * biggest_part_page_amount;
-            frame_free_list[Self::MAX_PAGE_VAL].push_back(page_frame_index);
+            let frame_mutex = &status[page_frame_index];
+            let mut frame = frame_mutex.lock().unwrap();
+            frame.order = Self::MAX_ORDER;
+            frame_free_list[Self::MAX_ORDER].push(frame_mutex.clone());
             println!(
-                "Add page frame {} into free list of value {}",
-                page_frame_index,
-                Self::MAX_PAGE_VAL
+                "Add page frame {} into free list of order {}",
+                frame.index, frame.order
             );
-            status[page_frame_index] = biggest_part_page_amount - 1;
         }
         *self.frame_free_list.lock().unwrap() = Some(frame_free_list);
         Ok(())
@@ -138,64 +169,92 @@ unsafe impl PageAllocator for BuddyPageAllocator {
      * Allocate a large size memory
      * size should be align to page size
      */
-    unsafe fn alloc_page(&self, size: usize) -> Result<usize, &'static str> {
-        let page_size = unsafe { &PAGE_SIZE as *const usize as usize };
-        if size % page_size != 0 {
-            return Err("Allocate size not align to page size");
+    pub unsafe fn alloc_page(&self, order: usize) -> Result<usize, &'static str> {
+        if order > Self::MAX_ORDER {
+            return Err("Request order is too big");
         }
-        if size > Self::biggest_part_size() {
-            return Err("Request size is too big");
-        }
-        let request_frame_amount = size / Self::page_size();
-        let request_val = request_frame_amount.ilog2();
+        let request_frame_amount = 1 << order;
         let mut frame_free_list = self.frame_free_list.lock().unwrap();
-        let mut request_node_val = request_val as usize;
-        while request_node_val <= Self::MAX_PAGE_VAL {
-            if !frame_free_list.as_ref().unwrap()[request_node_val].is_empty() {
+        let mut request_node_order = order;
+        while request_node_order <= Self::MAX_ORDER {
+            if !frame_free_list.as_ref().unwrap()[request_node_order].is_empty() {
                 break;
             }
-            if request_node_val == Self::MAX_PAGE_VAL {
+            if request_node_order == Self::MAX_ORDER {
                 return Err("There is no enough memory for now");
             }
-            request_node_val += 1;
+            request_node_order += 1;
         }
-        println!("Request node value: {}", request_node_val);
-        let index = frame_free_list.as_mut().unwrap()[request_node_val]
-            .pop_front()
+        println!("Request node order: {}", request_node_order);
+        let free_list_frame_mutex = frame_free_list.as_mut().unwrap()[request_node_order]
+            .pop()
             .unwrap();
-        let mut status = self.status.lock().unwrap();
-        status[index] = Self::ALLOCATED_VAL;
+        let free_list_frame = free_list_frame_mutex.lock().unwrap();
+        let status = self.status.lock().unwrap();
+        let status_frame = &mut status[free_list_frame.index].lock().unwrap();
+        status_frame.status = FrameStatus::Allocated;
+        status_frame.order = order;
         // free redundant
-        let mut release_node_frame_amount = (1 << request_node_val) >> 1;
-        let mut release_node_val = request_node_val - 1;
-        while release_node_frame_amount > request_frame_amount {
-            let release_index = index + release_node_frame_amount;
-            status[release_index] = release_node_val;
-            frame_free_list.as_mut().unwrap()[release_node_val].push_back(release_index);
+        let mut release_node_frame_amount = (1 << request_node_order) >> 1;
+        let mut release_node_order = request_node_order - 1;
+        while release_node_frame_amount >= request_frame_amount {
+            let release_index = free_list_frame.index + release_node_frame_amount;
+            status[release_index].lock().unwrap().order = release_node_order;
+            frame_free_list.as_mut().unwrap()[release_node_order]
+                .push(status[release_index].clone());
             println!(
-                "Release frame {} and set value = {}",
-                release_index, release_node_val
+                "Release frame {} and set order = {}",
+                release_index, release_node_order
             );
-            release_node_val -= 1;
+            release_node_order -= 1;
             release_node_frame_amount >>= 1;
         }
-        let allocate_addr = self.boundary.lock().unwrap().0 + index * Self::page_size();
-        println!("Allocate start addr: {:#18x}", allocate_addr);
+        let allocate_addr =
+            self.boundary.lock().unwrap().0 + free_list_frame.index * Self::page_size();
+        println!(
+            "Allocate start addr: {:#18x}, frame index: {}",
+            allocate_addr, free_list_frame.index
+        );
         Ok(allocate_addr)
     }
 
-    unsafe fn free_page(&self, page_start_addr: usize) {
-        todo!()
+    pub unsafe fn free_page(
+        &self,
+        page_start_addr: usize,
+        order: usize,
+    ) -> Result<(), &'static str> {
+        let page_size = Self::page_size();
+        if page_start_addr % page_size != 0 {
+            return Err("Page start address should align to page size");
+        }
+        let frame_index = (page_start_addr - self.boundary.lock().unwrap().0) / page_size;
+        let max_frame_index =
+            ((self.boundary.lock().unwrap().1 - self.boundary.lock().unwrap().0) / page_size) - 1;
+        if frame_index > max_frame_index {
+            return Err("Provide page start address is not a valid frame start address");
+        }
+        let status_frame_mutex = &self.status.lock().unwrap()[frame_index];
+        let mut status_frame = status_frame_mutex.lock().unwrap();
+        if status_frame.status != FrameStatus::Allocated {
+            return Err("Provie page start address is not an allocated frame start address");
+        }
+        status_frame.status = FrameStatus::Free;
+        // merge free block
+        self.merge_buddy(&mut status_frame);
+        self.frame_free_list.lock().unwrap().as_mut().unwrap()[status_frame.order]
+            .push(status_frame_mutex.clone());
+        println!(
+            "Frame {} has been freed(addr: {:#08x}). New order: {}",
+            frame_index, page_start_addr, status_frame.order
+        );
+        Ok(())
     }
 }
 
-pub fn register_page_allocator(page_allocator: &'static (dyn PageAllocator + Sync)) {
-    *PAGE_ALLOCATOR.lock().unwrap() = page_allocator;
-}
-
-pub fn page_allocator() -> &'static (dyn PageAllocator + Sync) {
+pub fn page_allocator() -> &'static BuddyPageAllocator {
     *PAGE_ALLOCATOR.lock().unwrap()
 }
 
-static PAGE_ALLOCATOR: Mutex<&'static (dyn PageAllocator + Sync)> =
-    Mutex::new(&NullPageAllocator::new());
+static BUDDY_PAGE_ALLOCATOR: BuddyPageAllocator = BuddyPageAllocator::new();
+
+static PAGE_ALLOCATOR: Mutex<&'static BuddyPageAllocator> = Mutex::new(&BUDDY_PAGE_ALLOCATOR);
