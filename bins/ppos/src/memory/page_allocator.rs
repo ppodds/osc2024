@@ -195,9 +195,11 @@ impl BuddyPageAllocator {
         status_frame.status = FrameStatus::Allocated;
         status_frame.order = order;
         // free redundant
-        let mut release_node_frame_amount = (1 << request_node_order) >> 1;
-        let mut release_node_order = request_node_order - 1;
-        while release_node_frame_amount >= request_frame_amount {
+        let mut release_node_frame_amount = 1 << request_node_order;
+        let mut release_node_order = request_node_order;
+        while release_node_frame_amount > request_frame_amount {
+            release_node_order -= 1;
+            release_node_frame_amount >>= 1;
             let release_index = free_list_frame.index + release_node_frame_amount;
             status[release_index].lock().unwrap().order = release_node_order;
             frame_free_list.as_mut().unwrap()[release_node_order]
@@ -206,8 +208,6 @@ impl BuddyPageAllocator {
                 "Release frame {} and set order = {}",
                 release_index, release_node_order
             );
-            release_node_order -= 1;
-            release_node_frame_amount >>= 1;
         }
         let allocate_addr =
             self.boundary.lock().unwrap().0 + free_list_frame.index * Self::page_size();

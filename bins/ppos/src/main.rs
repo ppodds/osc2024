@@ -42,7 +42,7 @@ unsafe fn kernel_init() -> ! {
             Ok(())
         })
         .unwrap();
-    let addr = page_allocator::page_allocator().alloc_page(1).unwrap();
+    let addr = page_allocator().alloc_page(1).unwrap();
     page_allocator().free_page(addr, 1).unwrap();
     kernel_start();
 }
