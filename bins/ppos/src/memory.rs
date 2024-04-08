@@ -25,5 +25,21 @@ extern "C" {
 
 pub static mut DEVICETREE_START_ADDR: usize = 0;
 
+#[inline(always)]
+fn round_up_with(v: usize, s: usize) -> usize {
+    (v + s - 1) & !(s - 1)
+}
+
+#[inline(always)]
+fn round_up(addr: usize) -> usize {
+    round_up_with(addr, page_size())
+}
+
+#[inline(always)]
+fn page_size() -> usize {
+    unsafe { &PAGE_SIZE as *const usize as usize }
+}
+
 pub mod heap_allocator;
 pub mod page_allocator;
+pub mod slab_allocator;

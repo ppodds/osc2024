@@ -1,9 +1,9 @@
-use core::array;
+use core::{alloc::GlobalAlloc, array};
 
 use alloc::{sync::Arc, vec::Vec};
 use library::{println, sync::mutex::Mutex};
 
-use crate::memory::PAGE_SIZE;
+use super::{page_size, round_up};
 
 #[derive(Debug, Clone, PartialEq)]
 enum FrameStatus {
@@ -55,12 +55,7 @@ impl BuddyPageAllocator {
 
     #[inline(always)]
     fn is_align_to_page_size(addr: usize) -> bool {
-        addr % Self::page_size() == 0
-    }
-
-    #[inline(always)]
-    fn page_size() -> usize {
-        unsafe { &PAGE_SIZE as *const usize as usize }
+        addr % page_size() == 0
     }
 
     #[inline(always)]
@@ -70,7 +65,7 @@ impl BuddyPageAllocator {
 
     #[inline(always)]
     fn biggest_part_size() -> usize {
-        Self::page_size() * Self::biggest_part_frame_amount()
+        page_size() * Self::biggest_part_frame_amount()
     }
 
     #[inline(always)]
@@ -135,8 +130,8 @@ impl BuddyPageAllocator {
             "Page allocatable memory total size: {} (reserved zone included)",
             memory_total_size
         );
-        println!("Page size: {}", Self::page_size());
-        let frame_amount = memory_total_size / Self::page_size();
+        println!("Page size: {}", page_size());
+        let frame_amount = memory_total_size / page_size();
         println!("Frame amount: {}", frame_amount);
         // initialize status array
         let mut status = self.status.lock().unwrap();
@@ -209,8 +204,7 @@ impl BuddyPageAllocator {
                 release_index, release_node_order
             );
         }
-        let allocate_addr =
-            self.boundary.lock().unwrap().0 + free_list_frame.index * Self::page_size();
+        let allocate_addr = self.boundary.lock().unwrap().0 + free_list_frame.index * page_size();
         println!(
             "Allocate start addr: {:#18x}, frame index: {}",
             allocate_addr, free_list_frame.index
@@ -223,7 +217,7 @@ impl BuddyPageAllocator {
         page_start_addr: usize,
         order: usize,
     ) -> Result<(), &'static str> {
-        let page_size = Self::page_size();
+        let page_size = page_size();
         if page_start_addr % page_size != 0 {
             return Err("Page start address should align to page size");
         }
@@ -248,6 +242,24 @@ impl BuddyPageAllocator {
             frame_index, page_start_addr, status_frame.order
         );
         Ok(())
+    }
+
+    #[inline(always)]
+    fn get_order_from_layout(layout: core::alloc::Layout) -> usize {
+        let size = round_up(layout.size());
+        (size / page_size()).ilog2() as usize
+    }
+}
+
+unsafe impl GlobalAlloc for BuddyPageAllocator {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        self.alloc_page(Self::get_order_from_layout(layout))
+            .unwrap() as *mut u8
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        self.free_page(ptr as usize, Self::get_order_from_layout(layout))
+            .unwrap();
     }
 }
 

@@ -11,7 +11,6 @@ mod shell;
 use core::{arch::global_asm, panic::PanicInfo};
 use cpu::cpu::{enable_kernel_space_interrupt, switch_to_el1};
 use library::println;
-use memory::page_allocator;
 use memory::page_allocator::page_allocator;
 use shell::Shell;
 
@@ -42,8 +41,6 @@ unsafe fn kernel_init() -> ! {
             Ok(())
         })
         .unwrap();
-    let addr = page_allocator().alloc_page(1).unwrap();
-    page_allocator().free_page(addr, 1).unwrap();
     kernel_start();
 }
 
