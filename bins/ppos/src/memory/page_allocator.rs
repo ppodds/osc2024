@@ -57,26 +57,21 @@ impl BuddyPageAllocator {
         let list_ins = &mut frame_free_list.as_mut().unwrap()[frame_order];
         let mut buddy_index_in_free_list = 0;
         // remove buddy from free list
-        let mut found = false;
         for i in 0..list_ins.len() {
             if list_ins[i] == buddy_index {
                 buddy_index_in_free_list = i;
-                // list_ins.swap_remove(buddy_index_in_free_list);
-                found = true;
+                list_ins.swap_remove(buddy_index_in_free_list);
+                println!("Remove buddy from free list. buddy index: {}", buddy_index);
+                println!(
+                    "Merge frame {} into frame {}. New val: {}",
+                    buddy_index,
+                    frame_index,
+                    frame_order + 1
+                );
+                // if merge success, merge buddy again
+                self.merge_buddy(frame_index, frame_order + 1);
                 break;
             }
-        }
-        if found {
-            list_ins.swap_remove(buddy_index_in_free_list);
-            println!("Remove buddy from free list. buddy index: {}", buddy_index);
-            println!(
-                "Merge frame {} into frame {}. New val: {}",
-                buddy_index,
-                frame_index,
-                frame_order + 1
-            );
-            // if merge success, merge buddy again
-            self.merge_buddy(frame_index, frame_order + 1);
         }
     }
 
@@ -193,6 +188,77 @@ impl BuddyPageAllocator {
     fn get_order_from_layout(layout: core::alloc::Layout) -> usize {
         let size = round_up(layout.size());
         (size / page_size()).ilog2() as usize
+    }
+
+    /**
+     * Reserve memory
+     * The reserve memory must not overlap with each other
+     */
+    pub unsafe fn reserve_memory(
+        &self,
+        start_addr: usize,
+        end_addr: usize,
+    ) -> Result<(), &'static str> {
+        let page_size = page_size();
+        if start_addr % page_size != 0 || end_addr % page_size != 0 {
+            return Err("Reserve memory start / end address should align to page size");
+        }
+        let reserve_size = end_addr - start_addr;
+        let biggest_part_size = Self::biggest_part_size();
+        self.reserve_memory_block(start_addr, end_addr, 0)?;
+        Ok(())
+    }
+
+    /**
+     * Reserve memory block
+     * The start / end address should align to the frame size
+     */
+    unsafe fn reserve_memory_block(
+        &self,
+        start_addr: usize,
+        end_addr: usize,
+        search_order: usize,
+    ) -> Result<(), &'static str> {
+        let page_size = page_size();
+        if start_addr % page_size != 0 || end_addr % page_size != 0 {
+            return Err("Reserve memory start / end address should align to page size");
+        }
+        let mut frame_free_list_mutex = self.frame_free_list.lock().unwrap();
+        let mut frame_free_list = frame_free_list_mutex.as_mut().unwrap();
+        for order in 0..=Self::MAX_ORDER {
+            let mut list_index = 0;
+            while list_index != frame_free_list[order].len() {
+                let frame_size: usize = (1 << order) * page_size;
+                let frame_index = frame_free_list[order][list_index];
+                let frame_start = self.boundary.lock().unwrap().0 + frame_index * page_size;
+                let frame_end = frame_start + frame_size;
+                if start_addr <= frame_start && end_addr >= frame_end {
+                    // frame is in the reserved zone
+                    frame_free_list[order].swap_remove(list_index);
+                    println!(
+                        "Remove frame {} from free list({:#x} - {:#x})",
+                        frame_index, frame_start, frame_end
+                    );
+                    if frame_size == end_addr - start_addr {
+                        return Ok(());
+                    }
+                } else if (start_addr >= frame_start && end_addr <= frame_end)
+                    || (start_addr < frame_start && end_addr < frame_end && end_addr > frame_start)
+                    || (start_addr > frame_start && end_addr > frame_end && start_addr < frame_end)
+                {
+                    // reserved zone and the frame is overlap
+                    let new_order = order - 1;
+                    frame_free_list[new_order].push(frame_index);
+                    frame_free_list[new_order].push(frame_index + (1 << new_order));
+                    frame_free_list[order].swap_remove(list_index);
+                    return self.reserve_memory_block(start_addr, end_addr, new_order);
+                } else {
+                    // reserved zone and the frame is not overlap
+                    list_index += 1;
+                }
+            }
+        }
+        Ok(())
     }
 }
 

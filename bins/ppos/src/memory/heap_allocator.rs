@@ -1,7 +1,8 @@
 use core::{alloc::GlobalAlloc, mem::align_of};
 
-use crate::memory;
 use library::sync::mutex::Mutex;
+
+use super::{heap_end_addr, heap_start_addr};
 
 #[global_allocator]
 static KERNEL_HEAP_ALLOCATOR: HeapAllocator = unsafe { HeapAllocator::new() };
@@ -16,13 +17,13 @@ impl HeapAllocatorInner {
     }
 
     unsafe fn alloc(&mut self, layout: core::alloc::Layout) -> *mut u8 {
-        if Self::heap_start_addr() + self.current + layout.size() > Self::heap_end_addr() {
+        if heap_start_addr() + self.current + layout.size() > heap_end_addr() {
             panic!(
                 "Heap memory is not enough to allocate {} bytes",
                 layout.size()
             );
         }
-        let p = (Self::heap_start_addr() + self.current) as *mut u8;
+        let p = (heap_start_addr() + self.current) as *mut u8;
         self.current += layout.size();
         // align to 8 bytes
         self.current += (self.current as *const u8).align_offset(align_of::<u64>());
@@ -30,16 +31,6 @@ impl HeapAllocatorInner {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {}
-
-    #[inline(always)]
-    unsafe fn heap_start_addr() -> usize {
-        &memory::__heap_begin as *const usize as usize
-    }
-
-    #[inline(always)]
-    unsafe fn heap_end_addr() -> usize {
-        &memory::__heap_end as *const usize as usize
-    }
 }
 
 pub struct HeapAllocator {

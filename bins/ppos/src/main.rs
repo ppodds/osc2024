@@ -11,7 +11,6 @@ mod shell;
 use core::{arch::global_asm, panic::PanicInfo};
 use cpu::cpu::{enable_kernel_space_interrupt, switch_to_el1};
 use library::println;
-use memory::page_allocator::page_allocator;
 use shell::Shell;
 
 global_asm!(include_str!("boot.s"));
@@ -30,17 +29,7 @@ unsafe fn kernel_init() -> ! {
     exception::handling_init();
     driver::init().unwrap();
     enable_kernel_space_interrupt();
-    let mut devicetree =
-        unsafe { devicetree::FlattenedDevicetree::from_memory(memory::DEVICETREE_START_ADDR) };
-    devicetree
-        .traverse(&move |device_name, property_name, property_value| {
-            if device_name == "memory@0" && property_name == "reg" {
-                let memory_end_addr = u64::from_be_bytes(property_value.try_into().unwrap());
-                page_allocator().init(0, memory_end_addr as usize)?;
-            }
-            Ok(())
-        })
-        .unwrap();
+    memory::init_allocator();
     kernel_start();
 }
 
