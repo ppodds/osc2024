@@ -1,44 +1,19 @@
 use core::{alloc::GlobalAlloc, array};
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 use library::{println, sync::mutex::Mutex};
 
 use super::{page_size, round_up};
 
-#[derive(Debug, Clone, PartialEq)]
-enum FrameStatus {
-    Free,
-    Allocated,
-}
-
-#[derive(Debug, Clone)]
-struct Frame {
-    index: usize,
-    status: FrameStatus,
-    order: usize,
-}
-
-impl Frame {
-    pub const fn new(index: usize) -> Self {
-        Self {
-            index,
-            status: FrameStatus::Free,
-            order: 0,
-        }
-    }
-}
-
-impl PartialEq for Frame {
-    fn eq(&self, other: &Self) -> bool {
-        self.index == other.index
-    }
-}
+type FrameIndex = usize;
+// simulate linked list with Vec which is better for cache
+type OrderFreeList = Vec<FrameIndex>;
+type FrameFreeList = [OrderFreeList; BuddyPageAllocator::MAX_ORDER + 1];
 
 #[derive(Debug)]
 pub struct BuddyPageAllocator {
     // workaround
-    frame_free_list: Mutex<Option<[Vec<Arc<Mutex<Frame>>>; Self::MAX_ORDER + 1]>>,
-    status: Mutex<Vec<Arc<Mutex<Frame>>>>,
+    frame_free_list: Mutex<Option<FrameFreeList>>,
     boundary: Mutex<(usize, usize)>,
 }
 
@@ -48,7 +23,6 @@ impl BuddyPageAllocator {
     pub const fn new() -> Self {
         Self {
             frame_free_list: Mutex::new(None),
-            status: Mutex::new(Vec::new()),
             boundary: Mutex::new((0, 0)),
         }
     }
@@ -69,48 +43,41 @@ impl BuddyPageAllocator {
     }
 
     #[inline(always)]
-    fn find_buddy_index(frame: &Frame) -> usize {
-        frame.index ^ (1 << frame.order)
+    fn find_buddy_index(frame_index: usize, frame_order: usize) -> usize {
+        frame_index ^ (1 << frame_order)
     }
 
-    fn merge_buddy(&self, frame: &mut Frame) {
-        if frame.order == Self::MAX_ORDER {
+    fn merge_buddy(&self, frame_index: usize, frame_order: usize) {
+        if frame_order == Self::MAX_ORDER {
             return;
         }
-        let buddy_index = Self::find_buddy_index(frame);
+        let buddy_index = Self::find_buddy_index(frame_index, frame_order);
         println!("buddy index: {}", buddy_index);
-        let buddy_frame_mutex = &self.status.lock().unwrap()[buddy_index];
-        let buddy_frame = buddy_frame_mutex.lock().unwrap();
-        println!(
-            "frame order: {}, buddy order: {}",
-            frame.order, buddy_frame.order
-        );
-        if buddy_frame.status == FrameStatus::Allocated {
-            return;
-        }
-        if frame.order != buddy_frame.order {
-            return;
-        }
-        frame.order += 1;
         let mut frame_free_list = self.frame_free_list.lock().unwrap();
-        let list_ins = &mut frame_free_list.as_mut().unwrap()[buddy_frame.order];
+        let list_ins = &mut frame_free_list.as_mut().unwrap()[frame_order];
         let mut buddy_index_in_free_list = 0;
         // remove buddy from free list
-        // not found in free list in not take into account
+        let mut found = false;
         for i in 0..list_ins.len() {
-            let f = list_ins[i].lock().unwrap();
-            if f.index == buddy_frame.index {
+            if list_ins[i] == buddy_index {
                 buddy_index_in_free_list = i;
-                println!("Remove buddy from free list. buddy index: {}", f.index);
+                // list_ins.swap_remove(buddy_index_in_free_list);
+                found = true;
                 break;
             }
         }
-        list_ins.swap_remove(buddy_index_in_free_list);
-        println!(
-            "Merge frame {} into frame {}. New val: {}",
-            buddy_index, frame.index, frame.order
-        );
-        self.merge_buddy(frame);
+        if found {
+            list_ins.swap_remove(buddy_index_in_free_list);
+            println!("Remove buddy from free list. buddy index: {}", buddy_index);
+            println!(
+                "Merge frame {} into frame {}. New val: {}",
+                buddy_index,
+                frame_index,
+                frame_order + 1
+            );
+            // if merge success, merge buddy again
+            self.merge_buddy(frame_index, frame_order + 1);
+        }
     }
 
     pub unsafe fn init(
@@ -133,12 +100,6 @@ impl BuddyPageAllocator {
         println!("Page size: {}", page_size());
         let frame_amount = memory_total_size / page_size();
         println!("Frame amount: {}", frame_amount);
-        // initialize status array
-        let mut status = self.status.lock().unwrap();
-        status.resize_with(frame_amount, || Arc::new(Mutex::new(Frame::new(0))));
-        for i in 0..status.len() {
-            status[i].lock().unwrap().index = i;
-        }
         let biggest_part_page_amount = Self::biggest_part_frame_amount();
         let biggest_part_size = Self::biggest_part_size();
         println!("Biggest part size: {}", biggest_part_size);
@@ -147,13 +108,11 @@ impl BuddyPageAllocator {
         println!("Biggest part amount: {}", frame_amount_of_biggest_part);
         for i in 0..frame_amount_of_biggest_part {
             let page_frame_index = i * biggest_part_page_amount;
-            let frame_mutex = &status[page_frame_index];
-            let mut frame = frame_mutex.lock().unwrap();
-            frame.order = Self::MAX_ORDER;
-            frame_free_list[Self::MAX_ORDER].push(frame_mutex.clone());
+            frame_free_list[Self::MAX_ORDER].push(page_frame_index);
             println!(
                 "Add page frame {} into free list of order {}",
-                frame.index, frame.order
+                page_frame_index,
+                Self::MAX_ORDER
             );
         }
         *self.frame_free_list.lock().unwrap() = Some(frame_free_list);
@@ -181,33 +140,26 @@ impl BuddyPageAllocator {
             request_node_order += 1;
         }
         println!("Request node order: {}", request_node_order);
-        let free_list_frame_mutex = frame_free_list.as_mut().unwrap()[request_node_order]
+        let free_frame_index = frame_free_list.as_mut().unwrap()[request_node_order]
             .pop()
             .unwrap();
-        let free_list_frame = free_list_frame_mutex.lock().unwrap();
-        let status = self.status.lock().unwrap();
-        let status_frame = &mut status[free_list_frame.index].lock().unwrap();
-        status_frame.status = FrameStatus::Allocated;
-        status_frame.order = order;
         // free redundant
         let mut release_node_frame_amount = 1 << request_node_order;
         let mut release_node_order = request_node_order;
         while release_node_frame_amount > request_frame_amount {
             release_node_order -= 1;
             release_node_frame_amount >>= 1;
-            let release_index = free_list_frame.index + release_node_frame_amount;
-            status[release_index].lock().unwrap().order = release_node_order;
-            frame_free_list.as_mut().unwrap()[release_node_order]
-                .push(status[release_index].clone());
+            let release_index = free_frame_index + release_node_frame_amount;
+            frame_free_list.as_mut().unwrap()[release_node_order].push(release_index);
             println!(
                 "Release frame {} and set order = {}",
                 release_index, release_node_order
             );
         }
-        let allocate_addr = self.boundary.lock().unwrap().0 + free_list_frame.index * page_size();
+        let allocate_addr = self.boundary.lock().unwrap().0 + free_frame_index * page_size();
         println!(
             "Allocate start addr: {:#18x}, frame index: {}",
-            allocate_addr, free_list_frame.index
+            allocate_addr, free_frame_index
         );
         Ok(allocate_addr)
     }
@@ -227,19 +179,12 @@ impl BuddyPageAllocator {
         if frame_index > max_frame_index {
             return Err("Provide page start address is not a valid frame start address");
         }
-        let status_frame_mutex = &self.status.lock().unwrap()[frame_index];
-        let mut status_frame = status_frame_mutex.lock().unwrap();
-        if status_frame.status != FrameStatus::Allocated {
-            return Err("Provie page start address is not an allocated frame start address");
-        }
-        status_frame.status = FrameStatus::Free;
         // merge free block
-        self.merge_buddy(&mut status_frame);
-        self.frame_free_list.lock().unwrap().as_mut().unwrap()[status_frame.order]
-            .push(status_frame_mutex.clone());
+        self.merge_buddy(frame_index, order);
+        self.frame_free_list.lock().unwrap().as_mut().unwrap()[order].push(frame_index);
         println!(
-            "Frame {} has been freed(addr: {:#08x}). New order: {}",
-            frame_index, page_start_addr, status_frame.order
+            "Frame {} has been freed(addr: {:#08x})",
+            frame_index, page_start_addr
         );
         Ok(())
     }
