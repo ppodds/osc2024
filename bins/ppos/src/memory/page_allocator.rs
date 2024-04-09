@@ -20,7 +20,7 @@ pub struct BuddyPageAllocator {
 impl BuddyPageAllocator {
     const MAX_ORDER: usize = 11;
 
-    pub const fn new() -> Self {
+    pub const unsafe fn new() -> Self {
         Self {
             frame_free_list: Mutex::new(None),
             boundary: Mutex::new((0, 0)),
@@ -55,12 +55,10 @@ impl BuddyPageAllocator {
         println!("buddy index: {}", buddy_index);
         let mut frame_free_list = self.frame_free_list.lock().unwrap();
         let list_ins = &mut frame_free_list.as_mut().unwrap()[frame_order];
-        let mut buddy_index_in_free_list = 0;
         // remove buddy from free list
         for i in 0..list_ins.len() {
             if list_ins[i] == buddy_index {
-                buddy_index_in_free_list = i;
-                list_ins.swap_remove(buddy_index_in_free_list);
+                list_ins.swap_remove(i);
                 println!("Remove buddy from free list. buddy index: {}", buddy_index);
                 println!(
                     "Merge frame {} into frame {}. New val: {}",
@@ -203,8 +201,6 @@ impl BuddyPageAllocator {
         if start_addr % page_size != 0 || end_addr % page_size != 0 {
             return Err("Reserve memory start / end address should align to page size");
         }
-        let reserve_size = end_addr - start_addr;
-        let biggest_part_size = Self::biggest_part_size();
         self.reserve_memory_block(start_addr, end_addr, 0)?;
         Ok(())
     }
@@ -224,8 +220,8 @@ impl BuddyPageAllocator {
             return Err("Reserve memory start / end address should align to page size");
         }
         let mut frame_free_list_mutex = self.frame_free_list.lock().unwrap();
-        let mut frame_free_list = frame_free_list_mutex.as_mut().unwrap();
-        for order in 0..=Self::MAX_ORDER {
+        let frame_free_list = frame_free_list_mutex.as_mut().unwrap();
+        for order in search_order..=Self::MAX_ORDER {
             let mut list_index = 0;
             while list_index != frame_free_list[order].len() {
                 let frame_size: usize = (1 << order) * page_size;
@@ -273,11 +269,3 @@ unsafe impl GlobalAlloc for BuddyPageAllocator {
             .unwrap();
     }
 }
-
-pub fn page_allocator() -> &'static BuddyPageAllocator {
-    *PAGE_ALLOCATOR.lock().unwrap()
-}
-
-static BUDDY_PAGE_ALLOCATOR: BuddyPageAllocator = BuddyPageAllocator::new();
-
-static PAGE_ALLOCATOR: Mutex<&'static BuddyPageAllocator> = Mutex::new(&BUDDY_PAGE_ALLOCATOR);

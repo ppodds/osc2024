@@ -2,7 +2,7 @@ use core::alloc::GlobalAlloc;
 
 use library::{println, sync::mutex::Mutex};
 
-use super::{page_allocator::page_allocator, page_size, round_up_with};
+use super::{page_allocator::BuddyPageAllocator, page_size, round_up_with};
 
 /**
  * Slab node
@@ -18,10 +18,10 @@ impl SlabNode {
      * Allocate size bytes
      * This method will update the next free node
      */
-    unsafe fn alloc_one(&mut self, size: usize) -> *mut u8 {
+    unsafe fn alloc_one(&mut self, page_allocator: &BuddyPageAllocator, size: usize) -> *mut u8 {
         // if there is no free node, allocate a new page
         if self.0.is_null() {
-            let frame = page_allocator().alloc(core::alloc::Layout::from_size_align_unchecked(
+            let frame = page_allocator.alloc(core::alloc::Layout::from_size_align_unchecked(
                 page_size(),
                 4,
             ));
@@ -65,24 +65,26 @@ impl SlabNode {
     }
 }
 
-pub struct SlabAllocator {
+pub struct SlabAllocator<'a> {
     /**
      * Slab node for each size
      * [8, 16, 32, 64, 128, 256, 512, 1024]
      */
-    slab_nodes: Mutex<[SlabNode; Self::SLAB_NODE_AMOUNT]>,
+    slab_nodes: Mutex<[SlabNode; SlabAllocator::SLAB_NODE_AMOUNT]>,
+    page_allocator: &'a BuddyPageAllocator,
 }
 
-impl SlabAllocator {
+impl<'a> SlabAllocator<'a> {
     const SLAB_NODE_AMOUNT: usize = 8;
     const MAX_SLAB_NODE: usize = 8 - 1;
     const MIN_SLAB_SIZE_SHIFT: usize = 3;
     const MIN_SLAB_SIZE: usize = 1 << Self::MIN_SLAB_SIZE_SHIFT;
     const MAX_SLAB_SIZE: usize = 1024;
 
-    const unsafe fn new() -> Self {
+    pub const unsafe fn new(page_allocator: &'a BuddyPageAllocator) -> Self {
         Self {
             slab_nodes: Mutex::new([SlabNode(core::ptr::null_mut()); Self::MAX_SLAB_NODE + 1]),
+            page_allocator,
         }
     }
 
@@ -96,29 +98,22 @@ impl SlabAllocator {
     }
 }
 
-unsafe impl Sync for SlabAllocator {}
-
-unsafe impl GlobalAlloc for SlabAllocator {
+unsafe impl<'a> GlobalAlloc for SlabAllocator<'a> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         if layout.size() > Self::MAX_SLAB_SIZE {
-            return page_allocator().alloc(layout);
+            return self.page_allocator.alloc(layout);
         }
         let (size, index) = Self::get_size_and_index(layout.size());
-        self.slab_nodes.lock().unwrap()[index].alloc_one(size)
+        self.slab_nodes.lock().unwrap()[index].alloc_one(&self.page_allocator, size)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
         if layout.size() > Self::MAX_SLAB_SIZE {
-            page_allocator().dealloc(ptr, layout);
+            self.page_allocator.dealloc(ptr, layout);
             return;
         }
 
         let (_, index) = Self::get_size_and_index(layout.size());
         self.slab_nodes.lock().unwrap()[index].dealloc_one(ptr);
     }
-}
-
-static SLAB_ALLOCATOR: SlabAllocator = unsafe { SlabAllocator::new() };
-pub fn slab_allocator() -> &'static SlabAllocator {
-    &SLAB_ALLOCATOR
 }

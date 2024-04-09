@@ -9,7 +9,7 @@ use library::{console, format, print, println, sync::mutex::Mutex};
 
 use crate::{
     driver::{self, mailbox},
-    memory::{self, page_allocator},
+    memory::{self},
 };
 
 pub struct Shell {
@@ -267,9 +267,7 @@ impl Shell {
         )
     }
 
-    fn mem_test(&self) {
-        
-    }
+    fn mem_test(&self) {}
 }
 
 struct AlertHandler {

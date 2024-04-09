@@ -4,9 +4,6 @@ use library::sync::mutex::Mutex;
 
 use super::{heap_end_addr, heap_start_addr};
 
-#[global_allocator]
-static KERNEL_HEAP_ALLOCATOR: HeapAllocator = unsafe { HeapAllocator::new() };
-
 struct HeapAllocatorInner {
     current: usize,
 }
