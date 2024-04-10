@@ -30,7 +30,7 @@ pub unsafe fn run_user_code(stack_end: u64, code_start: u64) {
     SPSR_EL1.write(
         SPSR_EL1::D::Masked
             + SPSR_EL1::A::Masked
-            + SPSR_EL1::I::Masked
+            + SPSR_EL1::I::Unmasked
             + SPSR_EL1::F::Masked
             + SPSR_EL1::M::EL0t,
     );
