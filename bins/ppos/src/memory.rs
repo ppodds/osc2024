@@ -14,7 +14,7 @@
 *    }
 */
 
-use self::{page_allocator::BuddyPageAllocator, slab_allocator::SlabAllocator};
+use self::{buddy_page_allocator::BuddyPageAllocator, slab_allocator::SlabAllocator};
 
 extern "C" {
     pub static __phys_dram_start_addr: usize;
