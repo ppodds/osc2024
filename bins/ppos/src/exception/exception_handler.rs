@@ -100,7 +100,7 @@ extern "C" fn lower_aarch64_synchronous(e: &mut ExceptionContext) {
 
 #[no_mangle]
 extern "C" fn lower_aarch64_irq(e: &mut ExceptionContext) {
-    default_exception_handler(e);
+    interrupt_manager::interrupt_manager().handle_pending_interrupt();
 }
 
 #[no_mangle]
