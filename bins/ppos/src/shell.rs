@@ -9,7 +9,7 @@ use library::{console, format, print, println, sync::mutex::Mutex};
 
 use crate::{
     driver::{self, mailbox},
-    memory::{self},
+    memory,
 };
 
 pub struct Shell {

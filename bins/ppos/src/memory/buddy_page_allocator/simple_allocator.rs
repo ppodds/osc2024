@@ -2,13 +2,13 @@ use core::{alloc::GlobalAlloc, mem::align_of};
 
 use library::sync::mutex::Mutex;
 
-use super::{heap_end_addr, heap_start_addr};
+use crate::memory::{heap_end_addr, heap_start_addr};
 
-struct HeapAllocatorInner {
+struct SimpleAllocatorInner {
     current: usize,
 }
 
-impl HeapAllocatorInner {
+impl SimpleAllocatorInner {
     const unsafe fn new() -> Self {
         Self { current: 0 }
     }
@@ -30,19 +30,19 @@ impl HeapAllocatorInner {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {}
 }
 
-pub struct HeapAllocator {
-    inner: Mutex<HeapAllocatorInner>,
+pub struct SimpleAllocator {
+    inner: Mutex<SimpleAllocatorInner>,
 }
 
-impl HeapAllocator {
+impl SimpleAllocator {
     pub const unsafe fn new() -> Self {
         Self {
-            inner: Mutex::new(HeapAllocatorInner::new()),
+            inner: Mutex::new(SimpleAllocatorInner::new()),
         }
     }
 }
 
-unsafe impl GlobalAlloc for HeapAllocator {
+unsafe impl GlobalAlloc for SimpleAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         let mut inner = self.inner.lock().unwrap();
         inner.alloc(layout)
@@ -52,4 +52,10 @@ unsafe impl GlobalAlloc for HeapAllocator {
         let inner = self.inner.lock().unwrap();
         inner.dealloc(ptr, layout);
     }
+}
+
+static SIMPLE_ALLOCATOR: SimpleAllocator = unsafe { SimpleAllocator::new() };
+
+pub fn simple_allocator() -> &'static SimpleAllocator {
+    &SIMPLE_ALLOCATOR
 }

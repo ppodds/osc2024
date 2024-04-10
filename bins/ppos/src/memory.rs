@@ -14,7 +14,7 @@
 *    }
 */
 
-use self::allocator_wrapper::AllocatorWrapper;
+use self::{page_allocator::BuddyPageAllocator, slab_allocator::SlabAllocator};
 
 extern "C" {
     pub static __phys_dram_start_addr: usize;
@@ -36,8 +36,18 @@ pub fn round_up_with(v: usize, s: usize) -> usize {
 }
 
 #[inline(always)]
+pub fn round_down_with(v: usize, s: usize) -> usize {
+    v & !(s - 1)
+}
+
+#[inline(always)]
 pub fn round_up(addr: usize) -> usize {
     round_up_with(addr, page_size())
+}
+
+#[inline(always)]
+pub fn round_down(addr: usize) -> usize {
+    round_down_with(addr, page_size())
 }
 
 #[inline(always)]
@@ -61,13 +71,69 @@ unsafe fn heap_end_addr() -> usize {
 }
 
 pub unsafe fn init_allocator() {
-    KERNEL_HEAP_ALLOCATOR.init();
+    // initialize buddy memory allocator first
+    let mut devicetree = devicetree::FlattenedDevicetree::from_memory(DEVICETREE_START_ADDR);
+    devicetree
+        .traverse(&move |device_name, property_name, property_value| {
+            if device_name == "memory@0" && property_name == "reg" {
+                let memory_end_addr = u64::from_be_bytes(property_value.try_into().unwrap());
+                BUDDY_PAGE_ALLOCATOR.init(0, memory_end_addr as usize)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    // for device
+    devicetree
+        .traverse_reserved_memory(&|start, size| {
+            BUDDY_PAGE_ALLOCATOR
+                .reserve_memory(start as usize, (start + size) as usize)
+                .unwrap();
+            Ok(())
+        })
+        .unwrap();
+    // kernel / stack / heap...
+    BUDDY_PAGE_ALLOCATOR
+        .reserve_memory(phys_dram_start_addr(), heap_end_addr())
+        .unwrap();
+    // CPIO archive
+    devicetree
+        .traverse(&|device_name, property_name, property_value| {
+            if property_name == "linux,initrd-start" {
+                CPIO_START_ADDR = u32::from_be_bytes(property_value.try_into().unwrap()) as usize;
+                return Ok(());
+            }
+            Ok(())
+        })
+        .unwrap();
+    devicetree
+        .traverse(&|device_name, property_name, property_value| {
+            if property_name == "linux,initrd-end" {
+                CPIO_END_ADDR = u32::from_be_bytes(property_value.try_into().unwrap()) as usize;
+                return Ok(());
+            }
+            Ok(())
+        })
+        .unwrap();
+    BUDDY_PAGE_ALLOCATOR
+        .reserve_memory(CPIO_START_ADDR, round_up(CPIO_END_ADDR))
+        .unwrap();
+    // device tree
+    BUDDY_PAGE_ALLOCATOR
+        .reserve_memory(
+            round_down(DEVICETREE_START_ADDR),
+            round_up(DEVICETREE_START_ADDR + devicetree.header().total_size() as usize),
+        )
+        .unwrap();
+    // simple allocator
+    BUDDY_PAGE_ALLOCATOR
+        .reserve_memory(heap_start_addr(), heap_end_addr())
+        .unwrap();
 }
 
-pub mod allocator_wrapper;
-pub mod heap_allocator;
-pub mod page_allocator;
-pub mod slab_allocator;
+mod buddy_page_allocator;
+mod slab_allocator;
+
+static BUDDY_PAGE_ALLOCATOR: BuddyPageAllocator = unsafe { BuddyPageAllocator::new() };
 
 #[global_allocator]
-static mut KERNEL_HEAP_ALLOCATOR: AllocatorWrapper = unsafe { AllocatorWrapper::new() };
+static SLAB_ALLOCATOR: SlabAllocator = unsafe { SlabAllocator::new(&BUDDY_PAGE_ALLOCATOR) };

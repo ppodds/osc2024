@@ -2,7 +2,7 @@ use core::alloc::GlobalAlloc;
 
 use library::{println, sync::mutex::Mutex};
 
-use super::{page_allocator::BuddyPageAllocator, page_size, round_up_with};
+use super::{buddy_page_allocator::BuddyPageAllocator, page_size, round_up_with};
 
 /**
  * Slab node
@@ -71,7 +71,7 @@ pub struct SlabAllocator<'a> {
      * [8, 16, 32, 64, 128, 256, 512, 1024]
      */
     slab_nodes: Mutex<[SlabNode; SlabAllocator::SLAB_NODE_AMOUNT]>,
-    page_allocator: &'a BuddyPageAllocator,
+    page_allocator: &'a BuddyPageAllocator<'a>,
 }
 
 impl<'a> SlabAllocator<'a> {
@@ -81,7 +81,7 @@ impl<'a> SlabAllocator<'a> {
     const MIN_SLAB_SIZE: usize = 1 << Self::MIN_SLAB_SIZE_SHIFT;
     const MAX_SLAB_SIZE: usize = 1024;
 
-    pub const unsafe fn new(page_allocator: &'a BuddyPageAllocator) -> Self {
+    pub const unsafe fn new(page_allocator: &'a BuddyPageAllocator<'a>) -> Self {
         Self {
             slab_nodes: Mutex::new([SlabNode(core::ptr::null_mut()); Self::MAX_SLAB_NODE + 1]),
             page_allocator,
