@@ -1,3 +1,8 @@
+use alloc::collections::LinkedList;
+use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
+use library::sync::mutex::Mutex;
+
+use crate::interrupt_manager::InterruptHandler;
 use crate::local_interrupt_controller::LocalInterruptController;
 use crate::{
     common::BoundedUsize, interrupt_manager::InterruptHandlerDescriptor,
@@ -63,33 +68,118 @@ impl Iterator for PendingInterrupts {
     }
 }
 
-pub struct InterruptController {
-    peripheral_ic: PeripheralIC,
-    local_interrupt_controller: LocalInterruptController,
+pub struct PendingInterruptHandlerDescriptor {
+    handler: &'static (dyn InterruptHandler + Send + Sync),
+    priority: usize,
 }
 
-impl InterruptController {
+impl PendingInterruptHandlerDescriptor {
+    pub const fn new(
+        handler: &'static (dyn InterruptHandler + Send + Sync),
+        priority: usize,
+    ) -> Self {
+        Self { handler, priority }
+    }
+}
+
+pub struct PendingInterruptQueue {
+    queue: Mutex<LinkedList<PendingInterruptHandlerDescriptor>>,
+    current_interrupt_priority: Mutex<usize>,
+}
+
+impl PendingInterruptQueue {
+    pub const fn new() -> Self {
+        Self {
+            queue: Mutex::new(LinkedList::new()),
+            current_interrupt_priority: Mutex::new(usize::MAX),
+        }
+    }
+
+    #[inline(always)]
+    pub fn push(&self, descriptor: PendingInterruptHandlerDescriptor) {
+        if self.can_preempt(descriptor.priority) {
+            self.queue.lock().unwrap().push_front(descriptor);
+        } else {
+            self.queue.lock().unwrap().push_back(descriptor);
+        }
+    }
+
+    #[inline(always)]
+    fn can_preempt(&self, priority: usize) -> bool {
+        *self.current_interrupt_priority.lock().unwrap() > priority
+    }
+}
+
+pub struct InterruptController<'a> {
+    peripheral_ic: PeripheralIC<'a>,
+    local_interrupt_controller: LocalInterruptController<'a>,
+    pending_interrupt_queue: &'a PendingInterruptQueue,
+}
+
+impl<'a> InterruptController<'a> {
     pub const MAX_LOCAL_INTERRUPT_NUMBER: usize = 3;
     pub const MAX_PERIPHERAL_INTERRUPT_NUMBER: usize = 63;
 
     pub const unsafe fn new(
         peripherial_ic_mmio_start_addr: usize,
         core_interrupt_source_mmio_start_addr: usize,
+        pending_interrupt_queue: &'a PendingInterruptQueue,
     ) -> Self {
         Self {
-            peripheral_ic: PeripheralIC::new(peripherial_ic_mmio_start_addr),
+            peripheral_ic: PeripheralIC::new(
+                peripherial_ic_mmio_start_addr,
+                pending_interrupt_queue,
+            ),
             local_interrupt_controller: LocalInterruptController::new(
                 core_interrupt_source_mmio_start_addr,
+                pending_interrupt_queue,
             ),
+            pending_interrupt_queue,
         }
+    }
+
+    fn check_and_do_interrupt(&self) {
+        let next_priority = self
+            .pending_interrupt_queue
+            .queue
+            .lock()
+            .unwrap()
+            .front()
+            .unwrap()
+            .priority;
+        if !self.pending_interrupt_queue.can_preempt(next_priority) {
+            return;
+        }
+        while let Some(descriptor) = self
+            .pending_interrupt_queue
+            .queue
+            .lock()
+            .unwrap()
+            .pop_front()
+        {
+            *self
+                .pending_interrupt_queue
+                .current_interrupt_priority
+                .lock()
+                .unwrap() = descriptor.priority;
+            unsafe { enable_kernel_space_interrupt() };
+            descriptor.handler.handle().unwrap();
+            unsafe { disable_kernel_space_interrupt() };
+            *self
+                .pending_interrupt_queue
+                .current_interrupt_priority
+                .lock()
+                .unwrap() = usize::MAX;
+        }
+        unsafe { enable_kernel_space_interrupt() };
     }
 }
 
-impl DeviceDriver for InterruptController {
+impl<'a> DeviceDriver for InterruptController<'a> {
     type InterruptNumberType = InterruptNumber;
 }
 
-impl InterruptManager for InterruptController {
+impl<'a> InterruptManager for InterruptController<'a> {
     type InterruptNumberType = InterruptNumber;
 
     fn register_handler(
@@ -102,14 +192,18 @@ impl InterruptManager for InterruptController {
                 .register_handler(InterruptHandlerDescriptor::new(
                     local_interrupt_number,
                     interrupt_handler_descriptor.name(),
+                    interrupt_handler_descriptor.prehook(),
                     interrupt_handler_descriptor.handler(),
+                    interrupt_handler_descriptor.priority(),
                 )),
             InterruptNumber::Peripheral(peripheral_interrupt_number) => self
                 .peripheral_ic
                 .register_handler(InterruptHandlerDescriptor::new(
                     peripheral_interrupt_number,
                     interrupt_handler_descriptor.name(),
+                    interrupt_handler_descriptor.prehook(),
                     interrupt_handler_descriptor.handler(),
+                    interrupt_handler_descriptor.priority(),
                 )),
         }
     }
@@ -124,5 +218,6 @@ impl InterruptManager for InterruptController {
     fn handle_pending_interrupt(&self) {
         self.local_interrupt_controller.handle_pending_interrupt();
         self.peripheral_ic.handle_pending_interrupt();
+        self.check_and_do_interrupt();
     }
 }

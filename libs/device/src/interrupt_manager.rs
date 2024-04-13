@@ -1,3 +1,4 @@
+use alloc::collections::LinkedList;
 use library::sync::mutex::Mutex;
 
 use crate::interrupt_controller::InterruptNumber;
@@ -45,6 +46,11 @@ pub trait InterruptHandler {
     fn handle(&self) -> Result<(), &'static str>;
 }
 
+pub trait InterruptPrehook {
+    /// Called when the coresponding interrupt handler is added to queue
+    fn prehook(&self) -> Result<(), &'static str>;
+}
+
 #[derive(Copy, Clone)]
 pub struct InterruptHandlerDescriptor<T>
 where
@@ -56,8 +62,14 @@ where
     /// Descriptive name.
     name: &'static str,
 
+    /// Reference to prehook trait object
+    prehook: Option<&'static (dyn InterruptPrehook + Sync + Send)>,
+
     /// Reference to handler trait object.
     handler: &'static (dyn InterruptHandler + Sync + Send),
+
+    /// Priority of the interrupt. Lower value means higher priority.
+    priority: usize,
 }
 
 impl<T> InterruptHandlerDescriptor<T>
@@ -68,28 +80,47 @@ where
     pub const fn new(
         number: T,
         name: &'static str,
+        prehook: Option<&'static (dyn InterruptPrehook + Sync + Send)>,
         handler: &'static (dyn InterruptHandler + Sync + Send),
+        priority: usize,
     ) -> Self {
         Self {
             number,
             name,
+            prehook,
             handler,
+            priority,
         }
     }
 
     /// Return the number.
+    #[inline(always)]
     pub const fn number(&self) -> T {
         self.number
     }
 
     /// Return the name.
+    #[inline(always)]
     pub const fn name(&self) -> &'static str {
         self.name
     }
 
+    /// Return the prehook
+    #[inline(always)]
+    pub const fn prehook(&self) -> Option<&'static (dyn InterruptPrehook + Sync + Send)> {
+        self.prehook
+    }
+
     /// Return the handler.
+    #[inline(always)]
     pub const fn handler(&self) -> &'static (dyn InterruptHandler + Sync + Send) {
         self.handler
+    }
+
+    /// Return the priority.
+    #[inline(always)]
+    pub const fn priority(&self) -> usize {
+        self.priority
     }
 }
 

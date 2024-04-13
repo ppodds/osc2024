@@ -1,7 +1,6 @@
 use aarch64_cpu::registers::*;
 use alloc::{boxed::Box, collections::LinkedList};
 use core::time::Duration;
-use cpu::cpu::enable_kernel_space_interrupt;
 use library::sync::mutex::Mutex;
 use tock_registers::{
     interfaces::ReadWriteable as _, register_bitfields, register_structs, registers::ReadWrite,
@@ -11,7 +10,7 @@ use crate::{
     common::MMIODerefWrapper,
     device_driver::DeviceDriver,
     interrupt_controller::InterruptNumber,
-    interrupt_manager::{self, InterruptHandler, InterruptHandlerDescriptor},
+    interrupt_manager::{self, InterruptHandler, InterruptHandlerDescriptor, InterruptPrehook},
 };
 
 register_bitfields! [
@@ -155,6 +154,13 @@ impl Timer {
     }
 }
 
+impl InterruptPrehook for Timer {
+    fn prehook(&self) -> Result<(), &'static str> {
+        self.disable_timer_interrupt();
+        Ok(())
+    }
+}
+
 impl InterruptHandler for Timer {
     fn handle(&self) -> Result<(), &'static str> {
         {
@@ -181,7 +187,6 @@ impl InterruptHandler for Timer {
             self.set_timeout_at(next_timeout_descriptor.time);
         }
         self.enable_timer_interrupt();
-        unsafe { enable_kernel_space_interrupt() };
         (timeout_descriptor.handler)()
     }
 }
@@ -193,7 +198,8 @@ impl DeviceDriver for Timer {
         &'static self,
         interrupt_number: &Self::InterruptNumberType,
     ) -> Result<(), &'static str> {
-        let descriptor = InterruptHandlerDescriptor::new(*interrupt_number, "timer", self);
+        let descriptor =
+            InterruptHandlerDescriptor::new(*interrupt_number, "timer", Some(self), self, 1);
         interrupt_manager::interrupt_manager().register_handler(descriptor)?;
         self.enable_timer_interrupt();
         Ok(())

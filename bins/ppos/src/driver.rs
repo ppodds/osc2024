@@ -5,8 +5,8 @@ use bsp::memory::{
 use device::device_driver::{driver_manager, DeviceDriverDescriptor};
 use device::gpio::GPIO;
 use device::interrupt_controller::{
-    InterruptController, InterruptNumber, LocalInterrupt, LocalInterruptType, PeripheralInterrupt,
-    PeripherialInterruptType,
+    InterruptController, InterruptNumber, LocalInterrupt, LocalInterruptType,
+    PendingInterruptQueue, PeripheralInterrupt, PeripherialInterruptType,
 };
 use device::interrupt_manager::register_interrupt_manager;
 use device::mailbox::Mailbox;
@@ -19,10 +19,12 @@ static MINI_UART: MiniUart = unsafe { MiniUart::new(AUX_MMIO_BASE) };
 static GPIO: GPIO = unsafe { GPIO::new(GPIO_MMIO_BASE) };
 static WATCHDOG: Watchdog = unsafe { Watchdog::new(WATCHDOG_MMIO_BASE) };
 static MAILBOX: Mailbox = unsafe { Mailbox::new(MAILBOX_MMIO_BASE) };
+static PENDING_INTERRUPT_QUEUE: PendingInterruptQueue = PendingInterruptQueue::new();
 static INTERRUPT_CONTROLLER: InterruptController = unsafe {
     InterruptController::new(
         INTERRUPT_CONTROLLER_MMIO_BASE,
         CORE_INTERRUPT_SOURCE_MMIO_BASE,
+        &PENDING_INTERRUPT_QUEUE,
     )
 };
 static TIMER: Timer = unsafe { Timer::new(CORE_TIMER_INTERRUPT_CONTROLL_MMIO_BASE) };
