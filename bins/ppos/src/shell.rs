@@ -12,6 +12,8 @@ use crate::{
     memory,
 };
 
+pub static mut SLAB_ALLOCATOR_DEBUG_ENABLE: bool = false;
+
 pub struct Shell {
     input: String,
 }
@@ -36,7 +38,7 @@ impl Shell {
     pub fn run(&mut self) -> ! {
         self.shell_hint();
         loop {
-            if let Some(c) = console::console().read_char_async() {
+            if let Some(c) = console::console().read_char() {
                 match c {
                     '\r' | '\n' => {
                         self.execute_command();
@@ -61,7 +63,7 @@ impl Shell {
         println!("run-program\t: run a program (image)");
         println!("switch-2s-alert\t: enable/disable 2s alert");
         println!("set-timeout\t: print a message after period of time");
-        println!("mem-test\t: test memory allocation");
+        println!("switch-slab-debug-mode\t: switch slab allocator debug mode");
     }
 
     fn reboot(&self) {
@@ -101,7 +103,7 @@ impl Shell {
                 "test" => self.test(),
                 "switch-2s-alert" => self.switch_2s_alert(),
                 "set-timeout" => self.set_timeout(args),
-                "mem-test" => self.mem_test(),
+                "switch-slab-debug-mode" => self.switch_slab_debug_mode(),
                 "" => (),
                 cmd => println!("{}: command not found", cmd),
             }
@@ -267,7 +269,9 @@ impl Shell {
         )
     }
 
-    fn mem_test(&self) {}
+    fn switch_slab_debug_mode(&self) {
+        unsafe { SLAB_ALLOCATOR_DEBUG_ENABLE = !SLAB_ALLOCATOR_DEBUG_ENABLE };
+    }
 }
 
 struct AlertHandler {

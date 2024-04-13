@@ -1,6 +1,12 @@
 use core::alloc::GlobalAlloc;
 
-use library::{println, sync::mutex::Mutex};
+use library::{
+    console::{Console, ConsoleMode},
+    println,
+    sync::mutex::Mutex,
+};
+
+use crate::{driver::mini_uart, shell::SLAB_ALLOCATOR_DEBUG_ENABLE};
 
 use super::{buddy_page_allocator::BuddyPageAllocator, page_size, round_up_with};
 
@@ -19,6 +25,7 @@ impl SlabNode {
      * This method will update the next free node
      */
     unsafe fn alloc_one(&mut self, page_allocator: &BuddyPageAllocator, size: usize) -> *mut u8 {
+        mini_uart().change_mode(ConsoleMode::Sync);
         // if there is no free node, allocate a new page
         if self.0.is_null() {
             let frame = page_allocator.alloc(core::alloc::Layout::from_size_align_unchecked(
@@ -34,9 +41,12 @@ impl SlabNode {
         // update the next free node
         self.0 = (*self.0).0;
         let res = res as *mut u8;
-        println!("Allocate {} bytes slab node at {:p}", size, res);
+        if SLAB_ALLOCATOR_DEBUG_ENABLE {
+            println!("Allocate {} bytes slab node at {:p}", size, res);
+        }
         // set the allocated memory to 0 to avoid uninitialized memory issue
         core::slice::from_raw_parts_mut(res, size).fill(0);
+        mini_uart().change_mode(ConsoleMode::Async);
         res
     }
 
@@ -45,10 +55,14 @@ impl SlabNode {
      * This method just make the node as the next free node and attach the original next free node to the new free node
      */
     unsafe fn dealloc_one(&mut self, ptr: *mut u8) {
+        mini_uart().change_mode(ConsoleMode::Sync);
         let ptr = ptr as *mut SlabNode;
         (*ptr).0 = self.0;
         self.0 = ptr;
-        println!("Deallocate slab node at {:p}", ptr);
+        if SLAB_ALLOCATOR_DEBUG_ENABLE {
+            println!("Deallocate slab node at {:p}", ptr);
+        }
+        mini_uart().change_mode(ConsoleMode::Async);
     }
 
     /**

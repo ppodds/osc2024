@@ -10,8 +10,13 @@ mod shell;
 
 use core::{arch::global_asm, panic::PanicInfo};
 use cpu::cpu::{enable_kernel_space_interrupt, switch_to_el1};
-use library::println;
+use library::{
+    console::{Console, ConsoleMode, Write},
+    println,
+};
 use shell::Shell;
+
+use crate::driver::mini_uart;
 
 global_asm!(include_str!("boot.s"));
 
@@ -28,8 +33,9 @@ pub unsafe extern "C" fn _start_rust(devicetree_start_addr: usize) -> ! {
 unsafe fn kernel_init() -> ! {
     exception::handling_init();
     driver::init().unwrap();
-    enable_kernel_space_interrupt();
     memory::init_allocator();
+    mini_uart().change_mode(ConsoleMode::Async);
+    enable_kernel_space_interrupt();
     kernel_start();
 }
 
@@ -40,6 +46,6 @@ fn kernel_start() -> ! {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    println!("{}", _info);
+    mini_uart().write_fmt(format_args!("{}", _info));
     loop {}
 }
