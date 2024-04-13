@@ -5,7 +5,9 @@ use tock_registers::{
 
 use crate::{
     common::MMIODerefWrapper,
-    interrupt_controller::LocalInterrupt,
+    interrupt_controller::{
+        LocalInterrupt, PendingInterruptHandlerDescriptor, PendingInterruptQueue,
+    },
     interrupt_manager::{InterruptHandlerDescriptor, InterruptManager},
 };
 
@@ -39,21 +41,26 @@ register_structs! {
 
 type HandlerTable = [Option<InterruptHandlerDescriptor<LocalInterrupt>>; LocalInterrupt::HIGH];
 
-pub struct LocalInterruptController {
+pub struct LocalInterruptController<'a> {
     readonly_registers: MMIODerefWrapper<CoreInterruptSourceRegisters>,
     handlers: Mutex<HandlerTable>,
+    pending_interrupt_queue: &'a PendingInterruptQueue,
 }
 
-impl LocalInterruptController {
-    pub const unsafe fn new(mmio_start_addr: usize) -> Self {
+impl<'a> LocalInterruptController<'a> {
+    pub const unsafe fn new(
+        mmio_start_addr: usize,
+        pending_interrupt_queue: &'a PendingInterruptQueue,
+    ) -> Self {
         Self {
             readonly_registers: MMIODerefWrapper::new(mmio_start_addr),
             handlers: Mutex::new([None; LocalInterrupt::HIGH]),
+            pending_interrupt_queue,
         }
     }
 }
 
-impl InterruptManager for LocalInterruptController {
+impl<'a> InterruptManager for LocalInterruptController<'a> {
     type InterruptNumberType = LocalInterrupt;
 
     fn register_handler(
@@ -77,7 +84,16 @@ impl InterruptManager for LocalInterruptController {
             if bitmask & 1 == 1 {
                 match self.handlers.lock().unwrap()[interrupt_number] {
                     None => panic!("No handler registered for interrupt {}", interrupt_number),
-                    Some(descriptor) => descriptor.handler().handle().unwrap(),
+                    Some(descriptor) => {
+                        if let Some(prehook) = descriptor.prehook() {
+                            prehook.prehook().unwrap();
+                        }
+                        self.pending_interrupt_queue
+                            .push(PendingInterruptHandlerDescriptor::new(
+                                descriptor.handler(),
+                                descriptor.priority(),
+                            ))
+                    }
                 }
             }
             bitmask >>= 1;

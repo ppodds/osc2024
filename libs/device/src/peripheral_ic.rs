@@ -7,7 +7,10 @@ use tock_registers::{
 
 use crate::{
     common::MMIODerefWrapper,
-    interrupt_controller::{PendingInterrupts, PeripheralInterrupt},
+    interrupt_controller::{
+        PendingInterruptHandlerDescriptor, PendingInterruptQueue, PendingInterrupts,
+        PeripheralInterrupt,
+    },
     interrupt_manager::{InterruptHandlerDescriptor, InterruptManager},
 };
 
@@ -37,18 +40,23 @@ register_structs! {
 type HandlerTable =
     [Option<InterruptHandlerDescriptor<PeripheralInterrupt>>; PeripheralInterrupt::HIGH];
 
-pub struct PeripheralIC {
+pub struct PeripheralIC<'a> {
     readonly_registers: MMIODerefWrapper<ReadOnlyRegisters>,
     readwrite_registers: Mutex<MMIODerefWrapper<ReadWriteRegisters>>,
     handlers: Mutex<HandlerTable>,
+    pending_interrupt_queue: &'a PendingInterruptQueue,
 }
 
-impl PeripheralIC {
-    pub const unsafe fn new(mmio_start_addr: usize) -> Self {
+impl<'a> PeripheralIC<'a> {
+    pub const unsafe fn new(
+        mmio_start_addr: usize,
+        pending_interrupt_queue: &'a PendingInterruptQueue,
+    ) -> Self {
         Self {
             readonly_registers: MMIODerefWrapper::new(mmio_start_addr),
             readwrite_registers: Mutex::new(MMIODerefWrapper::new(mmio_start_addr)),
             handlers: Mutex::new([None; PeripheralInterrupt::HIGH]),
+            pending_interrupt_queue,
         }
     }
 
@@ -59,7 +67,7 @@ impl PeripheralIC {
     }
 }
 
-impl InterruptManager for PeripheralIC {
+impl<'a> InterruptManager for PeripheralIC<'a> {
     type InterruptNumberType = PeripheralInterrupt;
 
     fn register_handler(
@@ -91,7 +99,16 @@ impl InterruptManager for PeripheralIC {
         for interrupt_number in self.pending_interrupts() {
             match self.handlers.lock().unwrap()[interrupt_number] {
                 None => panic!("No handler registered for interrupt {}", interrupt_number),
-                Some(descriptor) => descriptor.handler().handle().unwrap(),
+                Some(descriptor) => {
+                    if let Some(prehook) = descriptor.prehook() {
+                        prehook.prehook().unwrap();
+                    }
+                    self.pending_interrupt_queue
+                        .push(PendingInterruptHandlerDescriptor::new(
+                            descriptor.handler(),
+                            descriptor.priority(),
+                        ))
+                }
             }
         }
     }

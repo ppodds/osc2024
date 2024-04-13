@@ -10,7 +10,7 @@ use tock_registers::{
 use crate::{
     common::MMIODerefWrapper,
     interrupt_controller::InterruptNumber,
-    interrupt_manager::{self, InterruptHandler, InterruptHandlerDescriptor},
+    interrupt_manager::{self, InterruptHandler, InterruptHandlerDescriptor, InterruptPrehook},
 };
 
 use super::device_driver::DeviceDriver;
@@ -211,7 +211,7 @@ impl MiniUartInner {
     fn read_byte_async(&mut self) -> Option<u8> {
         // critical section
         // read buffer is shared between interrupt handlers
-        self.disable_read_interruot();
+        self.disable_read_interrupt();
         let c = self.read_buffer.pop();
         self.enable_read_interrupt();
         c
@@ -240,7 +240,7 @@ impl MiniUartInner {
     }
 
     #[inline(always)]
-    fn disable_read_interruot(&self) {
+    fn disable_read_interrupt(&self) {
         self.registers
             .interrupt_enable
             .modify(AUX_MU_IER::ENABLE_RECEIVE_INTERRUPT::DISABLE);
@@ -272,6 +272,23 @@ impl MiniUartInner {
             Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::RECEIVER_HOLDS_VAILD_BYTE) => {
                 let byte = self.read_byte();
                 self.read_buffer.push(byte);
+            }
+            None => panic!("Invalid interrupt"),
+        }
+    }
+
+    fn interrupt_prehook(&mut self) {
+        match self
+            .registers
+            .interrupt_identify
+            .read_as_enum(AUX_MU_IIR::INTERRUPT_ID_BITS)
+        {
+            Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::NO_INTERRUPT) => (),
+            Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::TRANSMIT_HOLDING_REGISTER_EMPTY) => {
+                self.disable_write_interrupt();
+            }
+            Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::RECEIVER_HOLDS_VAILD_BYTE) => {
+                self.disable_read_interrupt();
             }
             None => panic!("Invalid interrupt"),
         }
@@ -343,6 +360,13 @@ impl console::AsyncWrite for MiniUart {
 
 impl console::AsyncReadWrite for MiniUart {}
 
+impl InterruptPrehook for MiniUart {
+    fn prehook(&self) -> Result<(), &'static str> {
+        self.inner.lock().unwrap().interrupt_prehook();
+        Ok(())
+    }
+}
+
 impl InterruptHandler for MiniUart {
     fn handle(&self) -> Result<(), &'static str> {
         self.inner.lock().unwrap().handle_interrupt();
@@ -363,7 +387,8 @@ impl DeviceDriver for MiniUart {
         &'static self,
         interrupt_number: &Self::InterruptNumberType,
     ) -> Result<(), &'static str> {
-        let descriptor = InterruptHandlerDescriptor::new(*interrupt_number, "mini uart", self);
+        let descriptor =
+            InterruptHandlerDescriptor::new(*interrupt_number, "mini uart", Some(self), self, 0);
         interrupt_manager::interrupt_manager().register_handler(descriptor)?;
         interrupt_manager::interrupt_manager().enable(interrupt_number);
         let inner = self.inner.lock().unwrap();
