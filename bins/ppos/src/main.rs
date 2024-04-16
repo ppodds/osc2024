@@ -6,14 +6,17 @@ extern crate alloc;
 mod driver;
 mod exception;
 mod memory;
+mod scheduler;
 mod shell;
 
+use alloc::boxed::Box;
 use core::{arch::global_asm, panic::PanicInfo};
 use cpu::cpu::{enable_kernel_space_interrupt, switch_to_el1};
 use library::{
-    console::{Console, ConsoleMode, Write},
+    console::{Console, ConsoleMode},
     println,
 };
+use scheduler::{round_robin_scheduler::ROUND_ROBIN_SCHEDULER, task::Task};
 use shell::Shell;
 
 use crate::driver::mini_uart;
@@ -34,18 +37,25 @@ unsafe fn kernel_init() -> ! {
     exception::handling_init();
     driver::init().unwrap();
     memory::init_allocator();
+    scheduler::register_scheduler(&ROUND_ROBIN_SCHEDULER);
     mini_uart().change_mode(ConsoleMode::Async);
     enable_kernel_space_interrupt();
     kernel_start();
 }
 
 fn kernel_start() -> ! {
+    scheduler::scheduler().add_task(Box::new(Task::from_job(run_shell)));
+    scheduler::scheduler().start_scheduler();
+}
+
+pub fn run_shell() -> ! {
     let mut shell = Shell::new();
     shell.run();
 }
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    mini_uart().write_fmt(format_args!("{}", _info));
+    mini_uart().change_mode(ConsoleMode::Sync);
+    println!("{}", _info);
     loop {}
 }

@@ -6,7 +6,7 @@ use crate::memory::buddy_page_allocator::order_free_list::OrderFreeListNode;
 
 use self::order_free_list::OrderFreeList;
 
-use super::{page_size, round_up};
+use super::{round_up, PAGE_SIZE};
 
 pub mod order_free_list;
 mod simple_allocator;
@@ -32,7 +32,7 @@ impl<'a> BuddyPageAllocator<'a> {
 
     #[inline(always)]
     fn is_align_to_page_size(addr: usize) -> bool {
-        addr % page_size() == 0
+        addr % PAGE_SIZE == 0
     }
 
     #[inline(always)]
@@ -42,7 +42,7 @@ impl<'a> BuddyPageAllocator<'a> {
 
     #[inline(always)]
     fn biggest_part_size() -> usize {
-        page_size() * Self::biggest_part_frame_amount()
+        PAGE_SIZE * Self::biggest_part_frame_amount()
     }
 
     #[inline(always)]
@@ -97,8 +97,8 @@ impl<'a> BuddyPageAllocator<'a> {
             "Page allocatable memory total size: {} (reserved zone included)",
             memory_total_size
         );
-        println!("Page size: {}", page_size());
-        let frame_amount = memory_total_size / page_size();
+        println!("Page size: {}", PAGE_SIZE);
+        let frame_amount = memory_total_size / PAGE_SIZE;
         println!("Frame amount: {}", frame_amount);
         let biggest_part_page_amount = Self::biggest_part_frame_amount();
         let biggest_part_size = Self::biggest_part_size();
@@ -156,7 +156,7 @@ impl<'a> BuddyPageAllocator<'a> {
                 release_index, release_node_order
             );
         }
-        let allocate_addr = self.boundary.lock().unwrap().0 + free_frame_index * page_size();
+        let allocate_addr = self.boundary.lock().unwrap().0 + free_frame_index * PAGE_SIZE;
         println!(
             "Allocate start addr: {:#18x}, frame index: {}",
             allocate_addr, free_frame_index
@@ -169,13 +169,12 @@ impl<'a> BuddyPageAllocator<'a> {
         page_start_addr: usize,
         order: usize,
     ) -> Result<(), &'static str> {
-        let page_size = page_size();
-        if page_start_addr % page_size != 0 {
+        if page_start_addr % PAGE_SIZE != 0 {
             return Err("Page start address should align to page size");
         }
-        let frame_index = (page_start_addr - self.boundary.lock().unwrap().0) / page_size;
+        let frame_index = (page_start_addr - self.boundary.lock().unwrap().0) / PAGE_SIZE;
         let max_frame_index =
-            ((self.boundary.lock().unwrap().1 - self.boundary.lock().unwrap().0) / page_size) - 1;
+            ((self.boundary.lock().unwrap().1 - self.boundary.lock().unwrap().0) / PAGE_SIZE) - 1;
         if frame_index > max_frame_index {
             return Err("Provide page start address is not a valid frame start address");
         }
@@ -190,9 +189,9 @@ impl<'a> BuddyPageAllocator<'a> {
     }
 
     #[inline(always)]
-    fn get_order_from_layout(layout: core::alloc::Layout) -> usize {
+    const fn get_order_from_layout(layout: core::alloc::Layout) -> usize {
         let size = round_up(layout.size());
-        (size / page_size()).ilog2() as usize
+        (size / PAGE_SIZE).ilog2() as usize
     }
 
     /**
@@ -204,8 +203,7 @@ impl<'a> BuddyPageAllocator<'a> {
         start_addr: usize,
         end_addr: usize,
     ) -> Result<(), &'static str> {
-        let page_size = page_size();
-        if start_addr % page_size != 0 || end_addr % page_size != 0 {
+        if start_addr % PAGE_SIZE != 0 || end_addr % PAGE_SIZE != 0 {
             return Err("Reserve memory start / end address should align to page size");
         }
         self.reserve_memory_block(start_addr, end_addr, 0)?;
@@ -222,8 +220,7 @@ impl<'a> BuddyPageAllocator<'a> {
         end_addr: usize,
         search_order: usize,
     ) -> Result<(), &'static str> {
-        let page_size = page_size();
-        if start_addr % page_size != 0 || end_addr % page_size != 0 {
+        if start_addr % PAGE_SIZE != 0 || end_addr % PAGE_SIZE != 0 {
             return Err("Reserve memory start / end address should align to page size");
         }
         let mut frame_free_list_mutex = self.frame_free_list.lock().unwrap();
@@ -231,9 +228,9 @@ impl<'a> BuddyPageAllocator<'a> {
         for order in search_order..=Self::MAX_ORDER {
             let mut cur = frame_free_list[order].head();
             while let Some(node) = cur {
-                let frame_size: usize = (1 << order) * page_size;
+                let frame_size: usize = (1 << order) * PAGE_SIZE;
                 let frame_index = (*node).frame_index();
-                let frame_start = self.boundary.lock().unwrap().0 + frame_index * page_size;
+                let frame_start = self.boundary.lock().unwrap().0 + frame_index * PAGE_SIZE;
                 let frame_end = frame_start + frame_size;
                 // backup (prevent node memory has been freed)
                 let next = (*node).next();

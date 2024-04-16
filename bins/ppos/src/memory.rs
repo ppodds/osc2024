@@ -23,41 +23,41 @@ extern "C" {
     pub static __bss_end: usize;
     pub static __heap_begin: usize;
     pub static __heap_end: usize;
-    pub static PAGE_SIZE: usize;
 }
 
 pub static mut DEVICETREE_START_ADDR: usize = 0;
 pub static mut CPIO_START_ADDR: usize = 0;
 pub static mut CPIO_END_ADDR: usize = 0;
+pub const PAGE_SIZE: usize = 4096;
 
 #[inline(always)]
-pub fn round_up_with(v: usize, s: usize) -> usize {
+pub const fn round_up_with(v: usize, s: usize) -> usize {
     (v + s - 1) & !(s - 1)
 }
 
 #[inline(always)]
-pub fn round_down_with(v: usize, s: usize) -> usize {
+pub const fn round_down_with(v: usize, s: usize) -> usize {
     v & !(s - 1)
 }
 
 #[inline(always)]
-pub fn round_up(addr: usize) -> usize {
-    round_up_with(addr, page_size())
+pub const fn round_up(addr: usize) -> usize {
+    round_up_with(addr, PAGE_SIZE)
 }
 
 #[inline(always)]
-pub fn round_down(addr: usize) -> usize {
-    round_down_with(addr, page_size())
-}
-
-#[inline(always)]
-pub fn page_size() -> usize {
-    unsafe { &PAGE_SIZE as *const usize as usize }
+pub const fn round_down(addr: usize) -> usize {
+    round_down_with(addr, PAGE_SIZE)
 }
 
 #[inline(always)]
 pub fn phys_dram_start_addr() -> usize {
     unsafe { &__phys_dram_start_addr as *const usize as usize }
+}
+
+#[inline(always)]
+pub fn phys_binary_load_addr() -> usize {
+    unsafe { &__phys_binary_load_addr as *const usize as usize }
 }
 
 #[inline(always)]

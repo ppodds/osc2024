@@ -6,9 +6,9 @@ use library::{
     sync::mutex::Mutex,
 };
 
-use crate::{driver::mini_uart, shell::SLAB_ALLOCATOR_DEBUG_ENABLE};
+use crate::{driver::mini_uart, memory::PAGE_SIZE, shell::SLAB_ALLOCATOR_DEBUG_ENABLE};
 
-use super::{buddy_page_allocator::BuddyPageAllocator, page_size, round_up_with};
+use super::{buddy_page_allocator::BuddyPageAllocator, round_up_with};
 
 /**
  * Slab node
@@ -28,10 +28,8 @@ impl SlabNode {
         mini_uart().change_mode(ConsoleMode::Sync);
         // if there is no free node, allocate a new page
         if self.0.is_null() {
-            let frame = page_allocator.alloc(core::alloc::Layout::from_size_align_unchecked(
-                page_size(),
-                4,
-            ));
+            let frame =
+                page_allocator.alloc(core::alloc::Layout::from_size_align_unchecked(PAGE_SIZE, 4));
             println!("Allocate a new page for {} bytes slab node", size);
             self.init(size, frame);
         }
@@ -70,11 +68,11 @@ impl SlabNode {
      * This method allocates the slab node in a page at once
      */
     unsafe fn init(&mut self, size: usize, ptr: *mut u8) {
-        for i in (0..page_size()).step_by(size) {
+        for i in (0..PAGE_SIZE).step_by(size) {
             (ptr.add(i) as *mut SlabNode).write(SlabNode(ptr.add(i + size) as *mut SlabNode));
         }
         // last one
-        (ptr.add(page_size() - size) as *mut SlabNode).write(SlabNode(core::ptr::null_mut()));
+        (ptr.add(PAGE_SIZE - size) as *mut SlabNode).write(SlabNode(core::ptr::null_mut()));
         self.0 = ptr as *mut Self;
     }
 }

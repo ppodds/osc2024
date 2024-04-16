@@ -1,5 +1,5 @@
 use aarch64_cpu::registers::*;
-use alloc::{boxed::Box, collections::LinkedList};
+use alloc::{boxed::Box, collections::VecDeque};
 use core::time::Duration;
 use library::sync::mutex::Mutex;
 use tock_registers::{
@@ -64,7 +64,7 @@ register_structs! {
 pub struct Timer {
     core_timer_interrupt_controll_registers:
         Mutex<MMIODerefWrapper<CoreTimerInterruptControllRegisters>>,
-    timeout_handler_list: Mutex<LinkedList<TimeoutDescriptor>>,
+    timeout_handler_list: Mutex<VecDeque<TimeoutDescriptor>>,
 }
 
 pub struct TimeoutDescriptor {
@@ -88,12 +88,12 @@ impl Timer {
             core_timer_interrupt_controll_registers: Mutex::new(MMIODerefWrapper::new(
                 core_timer_interrupt_controll_registers_mmio_start_addr,
             )),
-            timeout_handler_list: Mutex::new(LinkedList::new()),
+            timeout_handler_list: Mutex::new(VecDeque::new()),
         }
     }
 
     #[inline(always)]
-    fn enable_timer_interrupt(&self) {
+    pub fn enable_timer_interrupt(&self) {
         CNTP_CTL_EL0.write(CNTP_CTL_EL0::ENABLE::SET + CNTP_CTL_EL0::IMASK::CLEAR);
         self.core_timer_interrupt_controll_registers
             .lock()
@@ -106,7 +106,7 @@ impl Timer {
     }
 
     #[inline(always)]
-    fn disable_timer_interrupt(&self) {
+    pub fn disable_timer_interrupt(&self) {
         self.core_timer_interrupt_controll_registers
             .lock()
             .unwrap()
@@ -120,7 +120,7 @@ impl Timer {
     }
 
     #[inline(always)]
-    fn tick_per_second(&self) -> u64 {
+    pub fn tick_per_second(&self) -> u64 {
         CNTFRQ_EL0.get()
     }
 
@@ -135,22 +135,40 @@ impl Timer {
     }
 
     pub fn set_timeout(&self, duration: Duration, handler: Box<TimeoutHandler>) {
-        let time_to_run_handler = self.current_time() + self.tick_per_second() * duration.as_secs();
+        self.set_timeout_raw(self.tick_per_second() * duration.as_secs(), handler)
+    }
+
+    pub fn set_timeout_raw(&self, duration: u64, handler: Box<TimeoutHandler>) {
+        let time_to_run_handler = self.current_time() + duration;
         let timeout_descriptor = TimeoutDescriptor::new(time_to_run_handler, handler);
         self.disable_timer_interrupt();
         let mut timeout_handler_list = self.timeout_handler_list.lock().unwrap();
-        if let Some(descriptor) = timeout_handler_list.front() {
-            if descriptor.time > time_to_run_handler {
-                timeout_handler_list.push_front(timeout_descriptor);
-                self.set_timeout_at(time_to_run_handler);
-            } else {
-                timeout_handler_list.push_back(timeout_descriptor);
-            }
-        } else {
-            timeout_handler_list.push_back(timeout_descriptor);
+        // O(1) optimization
+        if timeout_handler_list.is_empty()
+            || timeout_handler_list.front().unwrap().time > time_to_run_handler
+        {
+            timeout_handler_list.push_front(timeout_descriptor);
             self.set_timeout_at(time_to_run_handler);
+            self.enable_timer_interrupt();
+            return;
         }
-        self.enable_timer_interrupt();
+        if timeout_handler_list.back().unwrap().time < time_to_run_handler {
+            timeout_handler_list.push_back(timeout_descriptor);
+            self.enable_timer_interrupt();
+            return;
+        }
+        // O(n) find and insert
+        let mut i = 1;
+        while i < timeout_handler_list.len() {
+            if timeout_handler_list[i].time > time_to_run_handler {
+                timeout_handler_list.insert(i, timeout_descriptor);
+                self.set_timeout_at(time_to_run_handler);
+                self.enable_timer_interrupt();
+                return;
+            }
+            i += 1;
+        }
+        panic!("unreachable");
     }
 }
 
