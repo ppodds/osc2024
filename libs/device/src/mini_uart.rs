@@ -267,17 +267,19 @@ impl MiniUartInner {
         {
             Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::NO_INTERRUPT) => (),
             Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::TRANSMIT_HOLDING_REGISTER_EMPTY) => {
+                // if nothing to write, disable write interrupt
+                // or it will keep firing and racing cpu
+                self.disable_write_interrupt();
                 if let Some(byte) = self.write_buffer.pop() {
                     self.write_byte(byte);
-                } else {
-                    // nothing to write, disable write interrupt
-                    // or it will keep firing and racing cpu
-                    self.disable_write_interrupt();
+                    self.enable_write_interrupt();
                 }
             }
             Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::RECEIVER_HOLDS_VAILD_BYTE) => {
+                self.disable_read_interrupt();
                 let byte = self.read_byte();
                 self.read_buffer.push(byte);
+                self.enable_read_interrupt();
             }
             None => panic!("Invalid interrupt"),
         }
