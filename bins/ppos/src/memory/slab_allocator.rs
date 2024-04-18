@@ -1,5 +1,6 @@
 use core::alloc::GlobalAlloc;
 
+use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::{
     console::{Console, ConsoleMode},
     println,
@@ -112,14 +113,18 @@ impl<'a> SlabAllocator<'a> {
 
 unsafe impl<'a> GlobalAlloc for SlabAllocator<'a> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        disable_kernel_space_interrupt();
         if layout.size() > Self::MAX_SLAB_SIZE {
             return self.page_allocator.alloc(layout);
         }
         let (size, index) = Self::get_size_and_index(layout.size());
-        self.slab_nodes.lock().unwrap()[index].alloc_one(&self.page_allocator, size)
+        let ptr = self.slab_nodes.lock().unwrap()[index].alloc_one(&self.page_allocator, size);
+        enable_kernel_space_interrupt();
+        ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        disable_kernel_space_interrupt();
         if layout.size() > Self::MAX_SLAB_SIZE {
             self.page_allocator.dealloc(ptr, layout);
             return;
@@ -127,5 +132,6 @@ unsafe impl<'a> GlobalAlloc for SlabAllocator<'a> {
 
         let (_, index) = Self::get_size_and_index(layout.size());
         self.slab_nodes.lock().unwrap()[index].dealloc_one(ptr);
+        enable_kernel_space_interrupt();
     }
 }

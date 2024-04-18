@@ -1,6 +1,6 @@
 use core::arch::global_asm;
 
-use alloc::boxed::Box;
+use alloc::sync::Arc;
 use tock_registers::interfaces::Readable;
 
 use library::sync::mutex::Mutex;
@@ -24,7 +24,7 @@ pub fn current() -> *mut Task {
 pub trait Scheduler {
     fn schedule(&self) -> *mut Task;
 
-    fn add_task(&self, task: Box<Task>);
+    fn add_task(&self, task: Task);
 
     fn start_scheduler(&self) -> !;
 }
@@ -42,7 +42,7 @@ impl Scheduler for NullScheduler {
         unimplemented!()
     }
 
-    fn add_task(&self, task: Box<Task>) {
+    fn add_task(&self, task: Task) {
         unimplemented!()
     }
 

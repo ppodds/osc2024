@@ -1,11 +1,11 @@
 use core::time::Duration;
 
 use aarch64_cpu::registers::*;
-use alloc::boxed::Box;
 use alloc::string::String;
+use alloc::{boxed::Box, format};
 use cpio::CPIOArchive;
 use cpu::cpu;
-use library::{console, format, print, println, sync::mutex::Mutex};
+use library::{console, print, println, sync::mutex::Mutex};
 
 use crate::{
     driver::{self, mailbox},
@@ -198,17 +198,18 @@ impl Shell {
                             property_value.try_into().unwrap(),
                         ) as usize)
                     };
+
                     while let Some(file) = cpio_archive.read_next() {
                         if file.name != filename {
                             continue;
                         }
                         const STACK_SIZE: usize = 0x1000;
-                        let stack = Box::new([0u8; STACK_SIZE]);
+                        let stack = Box::new([0_u8; STACK_SIZE]);
                         let stack_end = stack.as_ptr() as u64 + STACK_SIZE as u64;
-                        println!("{:#018x}", file.content.as_ptr() as u64);
                         unsafe { cpu::run_user_code(stack_end, file.content.as_ptr() as u64) };
                     }
                     println!("run-program: {}: No such file or directory", filename);
+
                     return Ok(());
                 }
                 Ok(())

@@ -6,10 +6,11 @@ extern crate alloc;
 mod driver;
 mod exception;
 mod memory;
+mod pid;
 mod scheduler;
 mod shell;
+mod system_call;
 
-use alloc::boxed::Box;
 use core::{arch::global_asm, panic::PanicInfo};
 use cpu::cpu::{enable_kernel_space_interrupt, switch_to_el1};
 use library::{
@@ -44,7 +45,7 @@ unsafe fn kernel_init() -> ! {
 }
 
 fn kernel_start() -> ! {
-    scheduler::scheduler().add_task(Box::new(Task::from_job(run_shell)));
+    scheduler::scheduler().add_task(Task::from_job(run_shell));
     scheduler::scheduler().start_scheduler();
 }
 

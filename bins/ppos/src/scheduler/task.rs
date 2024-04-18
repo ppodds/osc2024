@@ -1,7 +1,12 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, sync::Arc};
 use cpu::thread::Thread;
+use library::sync::mutex::Mutex;
 
-use crate::{memory::PAGE_SIZE, scheduler::current};
+use crate::{
+    memory::PAGE_SIZE,
+    pid::{PIDNumber, PID},
+    scheduler::current,
+};
 
 use super::scheduler;
 
@@ -37,20 +42,22 @@ pub struct Task {
     thread: Thread,
     state: TaskState,
     stack: StackInfo,
+    pid: Arc<Mutex<PID>>,
 }
 
 impl Task {
-    pub const fn new(stack: StackInfo) -> Self {
+    pub fn new(stack: StackInfo) -> Self {
         Self {
             thread: Thread::new(),
             state: TaskState::Running,
             stack,
+            pid: Arc::new(Mutex::new(PID::new())),
         }
     }
 
     pub fn from_job(job: fn() -> !) -> Self {
         // call into_raw to prevent the Box from being dropped
-        let mut stack = Box::into_raw(Box::new([0; PAGE_SIZE]));
+        let mut stack = Box::into_raw(Box::new([0; 4 * PAGE_SIZE]));
         let stack_bottom = (stack as usize + (unsafe { *stack }).len()) as *mut u8;
         let mut task = Self::new(StackInfo::new(stack as *mut u8, stack_bottom));
         task.thread.context.pc = job as u64;
@@ -83,5 +90,10 @@ impl Task {
         // we can't clean up the task here because the task is still running
         scheduler().schedule();
         panic!("Unreachable!")
+    }
+
+    #[inline(always)]
+    pub fn pid(&self) -> PIDNumber {
+        self.pid.lock().unwrap().number()
     }
 }

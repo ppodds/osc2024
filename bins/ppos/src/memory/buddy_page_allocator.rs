@@ -1,5 +1,6 @@
 use core::{alloc::GlobalAlloc, array};
 
+use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::{println, sync::mutex::Mutex};
 
 use crate::memory::buddy_page_allocator::order_free_list::OrderFreeListNode;
@@ -264,12 +265,18 @@ impl<'a> BuddyPageAllocator<'a> {
 
 unsafe impl<'a> GlobalAlloc for BuddyPageAllocator<'a> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        self.alloc_page(Self::get_order_from_layout(layout))
-            .unwrap() as *mut u8
+        disable_kernel_space_interrupt();
+        let ptr = self
+            .alloc_page(Self::get_order_from_layout(layout))
+            .unwrap() as *mut u8;
+        enable_kernel_space_interrupt();
+        ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        disable_kernel_space_interrupt();
         self.free_page(ptr as usize, Self::get_order_from_layout(layout))
             .unwrap();
+        enable_kernel_space_interrupt();
     }
 }

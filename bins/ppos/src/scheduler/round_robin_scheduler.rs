@@ -2,6 +2,7 @@ use aarch64_cpu::registers::Writeable;
 use alloc::{
     boxed::Box,
     collections::{LinkedList, VecDeque},
+    sync::Arc,
 };
 use library::sync::mutex::Mutex;
 
@@ -17,8 +18,8 @@ use super::{
 };
 
 pub struct RoundRobinScheduler {
-    run_queue: Mutex<VecDeque<Box<Task>>>,
-    wait_queue: Mutex<LinkedList<Box<Task>>>,
+    run_queue: Mutex<VecDeque<Arc<Mutex<Task>>>>,
+    wait_queue: Mutex<LinkedList<Arc<Mutex<Task>>>>,
 }
 
 impl RoundRobinScheduler {
@@ -38,9 +39,12 @@ impl RoundRobinScheduler {
                 timer().disable_timer_interrupt();
                 self.run_queue.lock().unwrap().len()
             } {
-                let task = &self.run_queue.lock().unwrap()[i];
-                if task.state() == TaskState::Dead {
-                    self.run_queue.lock().unwrap().remove(i);
+                {
+                    let task_ref = self.run_queue.lock().unwrap()[i].clone();
+                    let task = task_ref.lock().unwrap();
+                    if task.state() == TaskState::Dead {
+                        self.run_queue.lock().unwrap().remove(i);
+                    }
                 }
                 timer().enable_timer_interrupt();
                 i += 1;
@@ -55,8 +59,8 @@ impl Scheduler for RoundRobinScheduler {
         // protect the scheduler from being interrupted
         timer().disable_timer_interrupt();
         if let Some(mut next_task) = self.run_queue.lock().unwrap().pop_front() {
-            let next = &mut *next_task as *mut Task;
-            let next_task_state = next_task.state();
+            let next_task_state = next_task.lock().unwrap().state();
+            let next = &mut *next_task.lock().unwrap() as *mut Task;
             self.run_queue.lock().unwrap().push_back(next_task);
             if next_task_state == TaskState::Dead {
                 timer().enable_timer_interrupt();
@@ -64,24 +68,26 @@ impl Scheduler for RoundRobinScheduler {
                 return self.schedule();
             }
             timer().enable_timer_interrupt();
-            let last = unsafe { switch_to(current(), next) };
-            return last;
+            unsafe { switch_to(current(), next) }
         } else {
             timer().enable_timer_interrupt();
             panic!("No task to run!");
         }
     }
 
-    fn add_task(&self, task: Box<Task>) {
-        self.run_queue.lock().unwrap().push_back(task);
+    fn add_task(&self, task: Task) {
+        self.run_queue
+            .lock()
+            .unwrap()
+            .push_back(Arc::new(Mutex::new(task)));
     }
 
     fn start_scheduler(&self) -> ! {
-        let idle_task = Box::new(Task::new(StackInfo::new(
+        let idle_task = Arc::new(Mutex::new(Task::new(StackInfo::new(
             phys_dram_start_addr() as *mut u8,
             phys_binary_load_addr() as *mut u8,
-        )));
-        let idle_task_ptr = &*idle_task as *const Task;
+        ))));
+        let idle_task_ptr = &*idle_task.lock().unwrap() as *const Task;
         {
             let mut run_queue = self.run_queue.lock().unwrap();
             // set the idle task as the first task, it will sync thread context automatically
