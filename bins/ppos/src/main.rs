@@ -11,7 +11,7 @@ mod shell;
 use core::{arch::global_asm, panic::PanicInfo};
 use cpu::cpu::{enable_kernel_space_interrupt, switch_to_el1};
 use library::{
-    console::{Console, ConsoleMode, Write},
+    console::{console, Console, ConsoleMode, Write},
     println,
 };
 use shell::Shell;
@@ -46,6 +46,7 @@ fn kernel_start() -> ! {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    mini_uart().write_fmt(format_args!("{}", _info));
+    console().change_mode(ConsoleMode::Sync);
+    println!("{}", _info);
     loop {}
 }
