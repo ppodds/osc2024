@@ -1,5 +1,6 @@
 use core::{alloc::GlobalAlloc, mem::align_of};
 
+use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::sync::mutex::Mutex;
 
 use crate::memory::{heap_end_addr, heap_start_addr};
@@ -44,13 +45,18 @@ impl SimpleAllocator {
 
 unsafe impl GlobalAlloc for SimpleAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        unsafe { disable_kernel_space_interrupt() };
         let mut inner = self.inner.lock().unwrap();
-        inner.alloc(layout)
+        let ptr = inner.alloc(layout);
+        unsafe { enable_kernel_space_interrupt() };
+        ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+        unsafe { disable_kernel_space_interrupt() };
         let inner = self.inner.lock().unwrap();
         inner.dealloc(ptr, layout);
+        unsafe { enable_kernel_space_interrupt() };
     }
 }
 
