@@ -1,5 +1,6 @@
 use crate::exception::exception_handler::ExceptionContext;
 
+mod exec;
 mod get_pid;
 mod uart_read;
 mod uart_write;
@@ -44,6 +45,9 @@ pub fn system_call(
         SystemCallNumber::GetPID => get_pid::get_pid() as usize,
         SystemCallNumber::UARTRead => uart_read::uart_read(arg0 as *mut char, arg1),
         SystemCallNumber::UARTWrite => uart_write::uart_write(arg0 as *const char, arg1),
+        SystemCallNumber::Exec => {
+            exec::exec(arg0 as *const char, arg1 as *const *const char) as usize
+        }
         _ => panic!("unsupport system call number"),
     };
     context.set_return_value(result as u64);
