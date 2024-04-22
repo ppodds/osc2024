@@ -31,9 +31,9 @@ pub unsafe extern "C" fn _start_rust(devicetree_start_addr: usize) -> ! {
 }
 
 unsafe fn kernel_init() -> ! {
+    memory::init_allocator();
     exception::handling_init();
     driver::init().unwrap();
-    memory::init_allocator();
     mini_uart().change_mode(ConsoleMode::Async);
     enable_kernel_space_interrupt();
     kernel_start();
