@@ -115,7 +115,9 @@ unsafe impl<'a> GlobalAlloc for SlabAllocator<'a> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         disable_kernel_space_interrupt();
         if layout.size() > Self::MAX_SLAB_SIZE {
-            return self.page_allocator.alloc(layout);
+            let ptr = self.page_allocator.alloc(layout);
+            enable_kernel_space_interrupt();
+            return ptr;
         }
         let (size, index) = Self::get_size_and_index(layout.size());
         let ptr = self.slab_nodes.lock().unwrap()[index].alloc_one(&self.page_allocator, size);
@@ -127,6 +129,7 @@ unsafe impl<'a> GlobalAlloc for SlabAllocator<'a> {
         disable_kernel_space_interrupt();
         if layout.size() > Self::MAX_SLAB_SIZE {
             self.page_allocator.dealloc(ptr, layout);
+            enable_kernel_space_interrupt();
             return;
         }
 

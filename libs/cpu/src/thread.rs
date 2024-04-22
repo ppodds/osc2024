@@ -18,8 +18,19 @@ pub struct CPUContext {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
+pub struct SoftwareThreadRegisters {
+    pub tpidr_el1: u64,
+    pub tpidr_el0: u64,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
 pub struct Thread {
     pub context: CPUContext,
+    pub software_thread_registers: SoftwareThreadRegisters,
+    pub elr_el1: u64,
+    pub sp_el0: u64,
+    pub spsr_el1: u64,
 }
 
 impl Thread {
@@ -40,6 +51,13 @@ impl Thread {
                 sp: 0,
                 pc: 0,
             },
+            software_thread_registers: SoftwareThreadRegisters {
+                tpidr_el1: 0,
+                tpidr_el0: 0,
+            },
+            elr_el1: 0,
+            sp_el0: 0,
+            spsr_el1: 0,
         }
     }
 }

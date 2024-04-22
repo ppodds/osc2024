@@ -1,6 +1,8 @@
 use crate::exception::exception_handler::ExceptionContext;
 
 mod get_pid;
+mod uart_read;
+mod uart_write;
 
 pub enum SystemCallNumber {
     GetPID,
@@ -13,8 +15,8 @@ pub enum SystemCallNumber {
     Kill,
 }
 
-impl From<u16> for SystemCallNumber {
-    fn from(value: u16) -> Self {
+impl From<u64> for SystemCallNumber {
+    fn from(value: u64) -> Self {
         match value {
             0 => SystemCallNumber::GetPID,
             1 => SystemCallNumber::UARTRead,
@@ -39,7 +41,9 @@ pub fn system_call(
     arg5: usize,
 ) {
     let result = match context.system_call_number().into() {
-        SystemCallNumber::GetPID => get_pid::get_pid(),
+        SystemCallNumber::GetPID => get_pid::get_pid() as usize,
+        SystemCallNumber::UARTRead => uart_read::uart_read(arg0 as *mut char, arg1),
+        SystemCallNumber::UARTWrite => uart_write::uart_write(arg0 as *const char, arg1),
         _ => panic!("unsupport system call number"),
     };
     context.set_return_value(result as u64);

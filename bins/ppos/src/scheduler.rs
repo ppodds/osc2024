@@ -1,6 +1,8 @@
 use core::arch::global_asm;
 
+use aarch64_cpu::registers::{Writeable, ELR_EL1, SPSR_EL1, SP_EL0, TPIDR_EL0, TPIDR_EL1};
 use alloc::sync::Arc;
+use cpu::thread::CPUContext;
 use tock_registers::interfaces::Readable;
 
 use library::sync::mutex::Mutex;
@@ -13,7 +15,28 @@ pub mod task;
 global_asm!(include_str!("scheduler/switch_to.s"));
 
 extern "C" {
-    pub fn switch_to(prev: *mut Task, next: *mut Task) -> *mut Task;
+    fn cpu_switch_to(prev: *mut Task, next: *mut Task) -> *mut Task;
+}
+
+unsafe fn software_thread_switch(prev: *mut Task, next: *mut Task) {
+    let prev = &mut *prev;
+    prev.thread.software_thread_registers.tpidr_el1 = TPIDR_EL1.get();
+    prev.thread.software_thread_registers.tpidr_el0 = TPIDR_EL0.get();
+    prev.thread.elr_el1 = ELR_EL1.get();
+    prev.thread.sp_el0 = SP_EL0.get();
+    prev.thread.spsr_el1 = SPSR_EL1.get();
+
+    TPIDR_EL0.set(next as u64);
+    TPIDR_EL1.set(next as u64);
+    let next = &*next;
+    ELR_EL1.set(next.thread.elr_el1);
+    SP_EL0.set(next.thread.sp_el0);
+    SPSR_EL1.set(next.thread.spsr_el1);
+}
+
+pub unsafe fn switch_to(prev: *mut Task, next: *mut Task) -> *mut Task {
+    software_thread_switch(prev, next);
+    cpu_switch_to(prev, next)
 }
 
 #[inline(always)]
@@ -27,6 +50,8 @@ pub trait Scheduler {
     fn add_task(&self, task: Task);
 
     fn start_scheduler(&self) -> !;
+
+    fn execute_task(&self, task: Task);
 }
 
 struct NullScheduler {}
@@ -47,6 +72,10 @@ impl Scheduler for NullScheduler {
     }
 
     fn start_scheduler(&self) -> ! {
+        unimplemented!()
+    }
+
+    fn execute_task(&self, task: Task) {
         unimplemented!()
     }
 }

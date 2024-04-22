@@ -1,10 +1,10 @@
 //------------------------------------------------------------------------------
-// fn switch_to(prev, next)
+// fn cpu_switch_to(prev, next)
 // On entry:
 // *   x0 = previous Task struct (must be preserved across the switch)
 // *   x1 = next Task struct
 //------------------------------------------------------------------------------
-switch_to:
+cpu_switch_to:
     mov x8, x0
     mov x9, sp
     stp x19, x20, [x8, 16 * 0]
@@ -24,8 +24,7 @@ switch_to:
     ldp fp, x9, [x8, 16 * 5]
     ldr lr, [x8, 16 * 6]
     mov sp,  x9
-    msr tpidr_el1, x1
     ret
 
-.global switch_to
-.type switch_to function
+.global cpu_switch_to
+.type cpu_switch_to function

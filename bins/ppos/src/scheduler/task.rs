@@ -39,7 +39,7 @@ impl StackInfo {
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct Task {
-    thread: Thread,
+    pub thread: Thread,
     state: TaskState,
     stack: StackInfo,
     pid: Arc<Mutex<PID>>,
@@ -57,17 +57,12 @@ impl Task {
 
     pub fn from_job(job: fn() -> !) -> Self {
         // call into_raw to prevent the Box from being dropped
-        let mut stack = Box::into_raw(Box::new([0; 4 * PAGE_SIZE]));
+        let mut stack = Box::into_raw(Box::new([0; 8 * PAGE_SIZE]));
         let stack_bottom = (stack as usize + (unsafe { *stack }).len()) as *mut u8;
         let mut task = Self::new(StackInfo::new(stack as *mut u8, stack_bottom));
         task.thread.context.pc = job as u64;
         task.thread.context.sp = stack_bottom as u64;
         task
-    }
-
-    #[inline(always)]
-    pub fn thread(&self) -> &Thread {
-        &self.thread
     }
 
     #[inline(always)]

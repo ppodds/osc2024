@@ -1,6 +1,7 @@
 use aarch64_cpu::registers::*;
 use alloc::{boxed::Box, collections::VecDeque};
 use core::time::Duration;
+use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::sync::mutex::Mutex;
 use tock_registers::{
     interfaces::ReadWriteable as _, register_bitfields, register_structs, registers::ReadWrite,
@@ -141,7 +142,7 @@ impl Timer {
     pub fn set_timeout_raw(&self, duration: u64, handler: Box<TimeoutHandler>) {
         let time_to_run_handler = self.current_time() + duration;
         let timeout_descriptor = TimeoutDescriptor::new(time_to_run_handler, handler);
-        self.disable_timer_interrupt();
+        unsafe { disable_kernel_space_interrupt() };
         let mut timeout_handler_list = self.timeout_handler_list.lock().unwrap();
         // O(1) optimization
         if timeout_handler_list.is_empty()
@@ -149,12 +150,12 @@ impl Timer {
         {
             timeout_handler_list.push_front(timeout_descriptor);
             self.set_timeout_at(time_to_run_handler);
-            self.enable_timer_interrupt();
+            unsafe { enable_kernel_space_interrupt() };
             return;
         }
         if timeout_handler_list.back().unwrap().time < time_to_run_handler {
             timeout_handler_list.push_back(timeout_descriptor);
-            self.enable_timer_interrupt();
+            unsafe { enable_kernel_space_interrupt() };
             return;
         }
         // O(n) find and insert
@@ -163,7 +164,7 @@ impl Timer {
             if timeout_handler_list[i].time > time_to_run_handler {
                 timeout_handler_list.insert(i, timeout_descriptor);
                 self.set_timeout_at(time_to_run_handler);
-                self.enable_timer_interrupt();
+                unsafe { enable_kernel_space_interrupt() };
                 return;
             }
             i += 1;

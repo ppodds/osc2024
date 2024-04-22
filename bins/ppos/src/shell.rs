@@ -2,11 +2,14 @@ use core::time::Duration;
 
 use aarch64_cpu::registers::*;
 use alloc::string::String;
+use alloc::vec::{self, Vec};
 use alloc::{boxed::Box, format};
 use cpio::CPIOArchive;
 use cpu::cpu;
 use library::{console, print, println, sync::mutex::Mutex};
 
+use crate::scheduler::scheduler;
+use crate::scheduler::task::Task;
 use crate::{
     driver::{self, mailbox},
     memory,
@@ -203,10 +206,14 @@ impl Shell {
                         if file.name != filename {
                             continue;
                         }
-                        const STACK_SIZE: usize = 0x1000;
-                        let stack = Box::new([0_u8; STACK_SIZE]);
-                        let stack_end = stack.as_ptr() as u64 + STACK_SIZE as u64;
-                        unsafe { cpu::run_user_code(stack_end, file.content.as_ptr() as u64) };
+                        let mut code = Vec::from(file.content).into_boxed_slice();
+                        let code_ptr = code.as_mut_ptr();
+                        Box::into_raw(code);
+                        let mut task = Task::from_job(unsafe {
+                            core::mem::transmute::<*mut u8, fn() -> !>(code_ptr)
+                        });
+                        scheduler().execute_task(task);
+                        return Ok(());
                     }
                     println!("run-program: {}: No such file or directory", filename);
 

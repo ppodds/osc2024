@@ -1,9 +1,14 @@
-use aarch64_cpu::registers::Writeable;
+use aarch64_cpu::{
+    asm::eret,
+    registers::{Writeable, SPSR_EL1, TPIDR_EL1},
+};
 use alloc::{
     boxed::Box,
     collections::{LinkedList, VecDeque},
     sync::Arc,
 };
+use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt, run_user_code};
+use device::timer;
 use library::sync::mutex::Mutex;
 
 use crate::{
@@ -57,20 +62,20 @@ impl RoundRobinScheduler {
 impl Scheduler for RoundRobinScheduler {
     fn schedule(&self) -> *mut Task {
         // protect the scheduler from being interrupted
-        timer().disable_timer_interrupt();
+        unsafe { disable_kernel_space_interrupt() };
         if let Some(mut next_task) = self.run_queue.lock().unwrap().pop_front() {
             let next_task_state = next_task.lock().unwrap().state();
             let next = &mut *next_task.lock().unwrap() as *mut Task;
             self.run_queue.lock().unwrap().push_back(next_task);
             if next_task_state == TaskState::Dead {
-                timer().enable_timer_interrupt();
+                unsafe { enable_kernel_space_interrupt() };
                 // if the task is dead, skip the job
                 return self.schedule();
             }
-            timer().enable_timer_interrupt();
+            unsafe { enable_kernel_space_interrupt() };
             unsafe { switch_to(current(), next) }
         } else {
-            timer().enable_timer_interrupt();
+            unsafe { enable_kernel_space_interrupt() };
             panic!("No task to run!");
         }
     }
@@ -100,6 +105,28 @@ impl Scheduler for RoundRobinScheduler {
             Box::new(scheduler_timer_handler),
         );
         self.idle();
+    }
+
+    fn execute_task(&self, mut task: Task) {
+        const USER_STACK_SIZE: usize = 4096;
+        let stack_end = Box::into_raw(Box::new([0_u8; USER_STACK_SIZE])) as u64;
+        let code_start = task.thread.context.pc;
+        {
+            task.thread.spsr_el1 = (SPSR_EL1::D::Masked
+                + SPSR_EL1::I::Unmasked
+                + SPSR_EL1::A::Masked
+                + SPSR_EL1::F::Masked
+                + SPSR_EL1::M::EL0t)
+                .into();
+            task.thread.elr_el1 = code_start;
+            task.thread.sp_el0 = stack_end;
+        }
+        let t = Arc::new(Mutex::new(task));
+        let task_ptr = &*t.lock().unwrap() as *const Task;
+        TPIDR_EL1.set(task_ptr as u64);
+        unsafe { disable_kernel_space_interrupt() };
+        self.run_queue.lock().unwrap().push_front(t);
+        unsafe { run_user_code(stack_end, code_start) };
     }
 }
 
