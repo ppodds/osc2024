@@ -1,8 +1,6 @@
 use core::arch::global_asm;
 
 use aarch64_cpu::registers::{Writeable, ELR_EL1, SPSR_EL1, SP_EL0, TPIDR_EL0, TPIDR_EL1};
-use alloc::sync::Arc;
-use cpu::thread::CPUContext;
 use tock_registers::interfaces::Readable;
 
 use library::sync::mutex::Mutex;

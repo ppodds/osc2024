@@ -65,6 +65,23 @@ impl Task {
         task
     }
 
+    pub fn fork(&self) -> Self {
+        let mut stack = Box::into_raw(Box::new([0; 8 * PAGE_SIZE]));
+        let stack_bottom = (stack as usize + (unsafe { *stack }).len()) as *mut u8;
+        let mut task = Self::new(StackInfo::new(stack as *mut u8, stack_bottom));
+        task.thread = self.thread.clone();
+        let used_stack_len = self.stack.bottom as u64 - self.thread.context.sp;
+        task.thread.context.sp = used_stack_len + stack_bottom as u64;
+        unsafe {
+            core::ptr::copy(
+                self.stack.bottom,
+                task.stack.bottom,
+                used_stack_len as usize,
+            )
+        };
+        task
+    }
+
     #[inline(always)]
     pub fn state(&self) -> TaskState {
         self.state
