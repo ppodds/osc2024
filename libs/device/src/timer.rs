@@ -151,11 +151,13 @@ impl Timer {
             timeout_handler_list.push_front(timeout_descriptor);
             self.set_timeout_at(time_to_run_handler);
             unsafe { enable_kernel_space_interrupt() };
+            self.enable_timer_interrupt();
             return;
         }
         if timeout_handler_list.back().unwrap().time < time_to_run_handler {
             timeout_handler_list.push_back(timeout_descriptor);
             unsafe { enable_kernel_space_interrupt() };
+            self.enable_timer_interrupt();
             return;
         }
         // O(n) find and insert
@@ -165,6 +167,7 @@ impl Timer {
                 timeout_handler_list.insert(i, timeout_descriptor);
                 self.set_timeout_at(time_to_run_handler);
                 unsafe { enable_kernel_space_interrupt() };
+                self.enable_timer_interrupt();
                 return;
             }
             i += 1;

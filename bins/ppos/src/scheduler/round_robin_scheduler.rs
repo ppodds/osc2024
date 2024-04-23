@@ -8,7 +8,6 @@ use alloc::{
     sync::Arc,
 };
 use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt, run_user_code};
-use device::timer;
 use library::sync::mutex::Mutex;
 
 use crate::{
@@ -41,7 +40,7 @@ impl RoundRobinScheduler {
         loop {
             let mut i = 0;
             while i < {
-                timer().disable_timer_interrupt();
+                unsafe { disable_kernel_space_interrupt() };
                 self.run_queue.lock().unwrap().len()
             } {
                 {
@@ -51,7 +50,7 @@ impl RoundRobinScheduler {
                         self.run_queue.lock().unwrap().remove(i);
                     }
                 }
-                timer().enable_timer_interrupt();
+                unsafe { enable_kernel_space_interrupt() };
                 i += 1;
             }
             self.schedule();
@@ -81,10 +80,12 @@ impl Scheduler for RoundRobinScheduler {
     }
 
     fn add_task(&self, task: Task) {
+        unsafe { disable_kernel_space_interrupt() };
         self.run_queue
             .lock()
             .unwrap()
             .push_back(Arc::new(Mutex::new(task)));
+        unsafe { enable_kernel_space_interrupt() };
     }
 
     fn start_scheduler(&self) -> ! {
@@ -123,9 +124,10 @@ impl Scheduler for RoundRobinScheduler {
         }
         let t = Arc::new(Mutex::new(task));
         let task_ptr = &*t.lock().unwrap() as *const Task;
-        TPIDR_EL1.set(task_ptr as u64);
         unsafe { disable_kernel_space_interrupt() };
+        TPIDR_EL1.set(task_ptr as u64);
         self.run_queue.lock().unwrap().push_front(t);
+        unsafe { enable_kernel_space_interrupt() };
         unsafe { run_user_code(stack_end, code_start) };
     }
 }
