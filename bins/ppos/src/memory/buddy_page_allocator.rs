@@ -158,8 +158,10 @@ impl<'a> BuddyPageAllocator<'a> {
         }
         let allocate_addr = self.boundary.lock().unwrap().0 + free_frame_index * PAGE_SIZE;
         println!(
-            "Allocate start addr: {:#18x}, frame index: {}",
-            allocate_addr, free_frame_index
+            "Allocate memory: {:#x}..{:#x}, frame index: {}",
+            allocate_addr,
+            allocate_addr + (1 << order) * PAGE_SIZE,
+            free_frame_index
         );
         Ok(allocate_addr)
     }

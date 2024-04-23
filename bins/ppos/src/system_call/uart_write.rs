@@ -1,11 +1,11 @@
 use core::slice;
 
-use library::console::console;
+use library::print;
 
-pub fn uart_write(buf: *const char, size: usize) -> usize {
+pub fn uart_write(buf: *const u8, size: usize) -> usize {
     let buffer = unsafe { slice::from_raw_parts(buf, size) };
     for c in buffer {
-        console().write_char(*c);
+        print!("{}", *c as char);
     }
     size
 }

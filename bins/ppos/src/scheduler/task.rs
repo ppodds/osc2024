@@ -57,7 +57,7 @@ impl Task {
 
     pub fn from_job(job: fn() -> !) -> Self {
         // call into_raw to prevent the Box from being dropped
-        let mut stack = Box::into_raw(Box::new([0; 8 * PAGE_SIZE]));
+        let mut stack = Box::into_raw(Box::new([0_u8; 1024 * PAGE_SIZE]));
         let stack_bottom = (stack as usize + (unsafe { *stack }).len()) as *mut u8;
         let mut task = Self::new(StackInfo::new(stack as *mut u8, stack_bottom));
         task.thread.context.pc = job as u64;
