@@ -4,6 +4,7 @@ mod exec;
 mod exit;
 mod fork;
 mod get_pid;
+mod mbox_call;
 mod uart_read;
 mod uart_write;
 
@@ -55,6 +56,7 @@ pub fn system_call(
             exit::exit();
             0
         }
+        SystemCallNumber::MBoxCall => mbox_call::mbox_call(arg0 as u8, arg1 as *mut u32) as usize,
         _ => panic!("unsupport system call number"),
     };
     context.set_return_value(result as u64);
