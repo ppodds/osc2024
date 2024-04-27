@@ -1,3 +1,4 @@
+use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::sync::mutex::Mutex;
 use tock_registers::{
     interfaces::{Readable, Writeable},
@@ -109,8 +110,11 @@ impl MailboxInner {
     }
 
     fn call(&self, channel: u8, buffer_addr: *mut u32) -> *mut u32 {
+        unsafe { disable_kernel_space_interrupt() };
         self.write(channel, buffer_addr);
-        self.read(channel)
+        let res = self.read(channel);
+        unsafe { enable_kernel_space_interrupt() };
+        res
     }
 
     fn get_board_revision(&self) -> u32 {

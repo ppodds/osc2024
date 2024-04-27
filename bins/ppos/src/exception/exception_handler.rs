@@ -3,12 +3,9 @@
 // Copyright (c) 2018-2023 Andre Richter <andre.o.richter@gmail.com>
 
 use aarch64_cpu::registers::*;
-use core::{arch::asm, fmt};
+use core::fmt;
+use cpu::cpu::enable_kernel_space_interrupt;
 use device::interrupt_manager;
-use library::{
-    console::{console, ConsoleMode},
-    println,
-};
 use tock_registers::{interfaces::Readable, registers::InMemoryRegister};
 
 use crate::system_call::system_call;
@@ -110,6 +107,7 @@ extern "C" fn current_elx_serror(e: &mut ExceptionContext) {
 
 #[no_mangle]
 extern "C" fn lower_aarch64_synchronous(e: &mut ExceptionContext) {
+    unsafe { enable_kernel_space_interrupt() };
     match e.esr_el1.exception_class() {
         Some(ESR_EL1::EC::Value::SVC64) => {
             if e.esr_el1.0.read(ESR_EL1::ISS) as u16 == 0 {

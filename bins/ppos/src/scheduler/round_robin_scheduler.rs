@@ -1,7 +1,4 @@
-use aarch64_cpu::{
-    asm::eret,
-    registers::{Writeable, SPSR_EL1, TPIDR_EL1},
-};
+use aarch64_cpu::registers::{Writeable, SPSR_EL1, TPIDR_EL1};
 use alloc::{
     boxed::Box,
     collections::{LinkedList, VecDeque},
@@ -79,12 +76,9 @@ impl Scheduler for RoundRobinScheduler {
         }
     }
 
-    fn add_task(&self, task: Task) {
+    fn add_task(&self, task: Arc<Mutex<Task>>) {
         unsafe { disable_kernel_space_interrupt() };
-        self.run_queue
-            .lock()
-            .unwrap()
-            .push_back(Arc::new(Mutex::new(task)));
+        self.run_queue.lock().unwrap().push_back(task);
         unsafe { enable_kernel_space_interrupt() };
     }
 

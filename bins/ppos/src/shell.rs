@@ -1,15 +1,14 @@
+use core::arch::asm;
 use core::time::Duration;
 
 use aarch64_cpu::registers::*;
 use alloc::string::String;
-use alloc::vec::{self, Vec};
+use alloc::vec::Vec;
 use alloc::{boxed::Box, format};
 use cpio::CPIOArchive;
-use cpu::cpu;
 use library::{console, print, println, sync::mutex::Mutex};
 
-use crate::scheduler::scheduler;
-use crate::scheduler::task::Task;
+use crate::scheduler::current;
 use crate::{
     driver::{self, mailbox},
     memory,
@@ -207,12 +206,20 @@ impl Shell {
                             continue;
                         }
                         let mut code = Vec::from(file.content).into_boxed_slice();
-                        let code_ptr = code.as_mut_ptr();
+                        let code_start = code.as_ptr();
                         Box::into_raw(code);
-                        let mut task = Task::from_job(unsafe {
-                            core::mem::transmute::<*mut u8, fn() -> !>(code_ptr)
-                        });
-                        scheduler().execute_task(task);
+                        let mut sp = 0;
+                        unsafe {
+                            asm!(
+                                "mov {}, sp",
+                                out(reg) sp,
+                            );
+                        }
+                        let child_task = unsafe { &*current() }.fork(sp);
+                        if child_task == current() {
+                            unsafe { &mut *child_task }
+                                .run_user_program(code_start as *const fn() -> !)
+                        }
                         return Ok(());
                     }
                     println!("run-program: {}: No such file or directory", filename);
