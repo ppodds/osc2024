@@ -208,18 +208,7 @@ impl Shell {
                         let mut code = Vec::from(file.content).into_boxed_slice();
                         let code_start = code.as_ptr();
                         Box::into_raw(code);
-                        let mut sp = 0;
-                        unsafe {
-                            asm!(
-                                "mov {}, sp",
-                                out(reg) sp,
-                            );
-                        }
-                        let child_task = unsafe { &*current() }.fork(sp);
-                        if child_task == current() {
-                            unsafe { &mut *child_task }
-                                .run_user_program(code_start as *const fn() -> !)
-                        }
+                        unsafe { &mut *current() }.run_user_program(code_start as *const fn() -> !);
                         return Ok(());
                     }
                     println!("run-program: {}: No such file or directory", filename);
