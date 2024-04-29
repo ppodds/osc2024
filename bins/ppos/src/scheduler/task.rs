@@ -2,6 +2,7 @@ use core::arch::asm;
 
 use aarch64_cpu::registers::Readable;
 use aarch64_cpu::registers::SP_EL0;
+use alloc::rc::Rc;
 use alloc::{boxed::Box, sync::Arc};
 use cpu::cpu::run_user_code;
 use cpu::thread::Thread;
@@ -145,7 +146,7 @@ impl Task {
                 return_addr,
             );
         }
-        let task = Arc::new(Mutex::new(task));
+        let task = Rc::new(Mutex::new(task));
         let task_ptr = &mut *task.lock().unwrap() as *mut Task;
         scheduler().add_task(task);
         task_ptr

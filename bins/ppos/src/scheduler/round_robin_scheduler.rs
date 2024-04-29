@@ -2,7 +2,7 @@ use aarch64_cpu::registers::{Writeable, SPSR_EL1, TPIDR_EL1};
 use alloc::{
     boxed::Box,
     collections::{LinkedList, VecDeque},
-    sync::Arc,
+    rc::Rc,
 };
 use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt, run_user_code};
 use library::sync::mutex::Mutex;
@@ -19,8 +19,8 @@ use super::{
 };
 
 pub struct RoundRobinScheduler {
-    run_queue: Mutex<VecDeque<Arc<Mutex<Task>>>>,
-    wait_queue: Mutex<LinkedList<Arc<Mutex<Task>>>>,
+    run_queue: Mutex<VecDeque<Rc<Mutex<Task>>>>,
+    wait_queue: Mutex<LinkedList<Rc<Mutex<Task>>>>,
 }
 
 impl RoundRobinScheduler {
@@ -76,14 +76,14 @@ impl Scheduler for RoundRobinScheduler {
         }
     }
 
-    fn add_task(&self, task: Arc<Mutex<Task>>) {
+    fn add_task(&self, task: Rc<Mutex<Task>>) {
         unsafe { disable_kernel_space_interrupt() };
         self.run_queue.lock().unwrap().push_back(task);
         unsafe { enable_kernel_space_interrupt() };
     }
 
     fn start_scheduler(&self) -> ! {
-        let idle_task = Arc::new(Mutex::new(Task::new(StackInfo::new(
+        let idle_task = Rc::new(Mutex::new(Task::new(StackInfo::new(
             phys_dram_start_addr() as *mut u8,
             phys_binary_load_addr() as *mut u8,
         ))));
@@ -116,7 +116,7 @@ impl Scheduler for RoundRobinScheduler {
             task.thread.elr_el1 = code_start;
             task.thread.sp_el0 = stack_end;
         }
-        let t = Arc::new(Mutex::new(task));
+        let t = Rc::new(Mutex::new(task));
         let task_ptr = &*t.lock().unwrap() as *const Task;
         unsafe { disable_kernel_space_interrupt() };
         TPIDR_EL1.set(task_ptr as u64);

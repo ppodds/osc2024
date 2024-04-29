@@ -1,7 +1,7 @@
 use core::arch::global_asm;
 
 use aarch64_cpu::registers::{Writeable, ELR_EL1, SPSR_EL1, SP_EL0, TPIDR_EL0, TPIDR_EL1};
-use alloc::sync::Arc;
+use alloc::rc::Rc;
 use tock_registers::interfaces::Readable;
 
 use library::sync::mutex::Mutex;
@@ -46,7 +46,7 @@ pub fn current() -> *mut Task {
 pub trait Scheduler {
     fn schedule(&self) -> *mut Task;
 
-    fn add_task(&self, task: Arc<Mutex<Task>>);
+    fn add_task(&self, task: Rc<Mutex<Task>>);
 
     fn start_scheduler(&self) -> !;
 
@@ -66,7 +66,7 @@ impl Scheduler for NullScheduler {
         unimplemented!()
     }
 
-    fn add_task(&self, task: Arc<Mutex<Task>>) {
+    fn add_task(&self, task: Rc<Mutex<Task>>) {
         unimplemented!()
     }
 

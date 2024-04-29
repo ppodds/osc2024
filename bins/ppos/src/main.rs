@@ -11,7 +11,7 @@ mod scheduler;
 mod shell;
 mod system_call;
 
-use alloc::sync::Arc;
+use alloc::rc::Rc;
 use core::{arch::global_asm, panic::PanicInfo};
 use cpu::cpu::{enable_kernel_space_interrupt, switch_to_el1};
 use library::{
@@ -47,7 +47,7 @@ unsafe fn kernel_init() -> ! {
 }
 
 fn kernel_start() -> ! {
-    scheduler::scheduler().add_task(Arc::new(Mutex::new(Task::from_job(run_shell))));
+    scheduler::scheduler().add_task(Rc::new(Mutex::new(Task::from_job(run_shell))));
     scheduler::scheduler().start_scheduler();
 }
 
