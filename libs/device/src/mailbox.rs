@@ -1,4 +1,3 @@
-use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::sync::mutex::Mutex;
 use tock_registers::{
     interfaces::{Readable, Writeable},
@@ -91,7 +90,9 @@ impl MailboxInner {
 
     fn read(&self, channel: u8) -> *mut u32 {
         loop {
-            while !self.is_readable() {}
+            while !self.is_readable() {
+                core::hint::spin_loop();
+            }
             let tmp = self.registers.read.get();
             let data = tmp & !(0b1111);
             let data_channel = (tmp & 0b1111) as u8;
@@ -103,18 +104,17 @@ impl MailboxInner {
     }
 
     fn write(&self, channel: u8, buffer_addr: *mut u32) {
-        while !self.is_writable() {}
+        while !self.is_writable() {
+            core::hint::spin_loop();
+        }
         // use 28 MSB
         let message_addr = buffer_addr as u32 & !(0b1111);
         self.registers.write.set(message_addr | channel as u32);
     }
 
     fn call(&self, channel: u8, buffer_addr: *mut u32) -> *mut u32 {
-        unsafe { disable_kernel_space_interrupt() };
         self.write(channel, buffer_addr);
-        let res = self.read(channel);
-        unsafe { enable_kernel_space_interrupt() };
-        res
+        self.read(channel)
     }
 
     fn get_board_revision(&self) -> u32 {
