@@ -205,12 +205,16 @@ impl MiniUartInner {
     }
 
     fn read_byte(&mut self) -> u8 {
-        while !self.is_readable() {}
+        while !self.is_readable() {
+            core::hint::spin_loop();
+        }
         self.registers.data.get() as u8
     }
 
     fn write_byte(&mut self, value: u8) {
-        while !self.is_writable() {}
+        while !self.is_writable() {
+            core::hint::spin_loop();
+        }
         self.registers.data.set(value as u32);
     }
 
