@@ -39,7 +39,7 @@ KERNEL_MANIFEST      = Cargo.toml
 KERNEL_LINKER_SCRIPT = linker.ld
 LAST_BUILD_CONFIG    = target/$(BSP).build_config
 
-PROGRAM_ELF      = ../../target/$(TARGET)/debug/system-call-test-program
+PROGRAM_ELF      = ../../target/$(TARGET)/release/system-call-test-program
 # This parses cargo's dep-info file.
 # https://doc.rust-lang.org/cargo/guide/build-cache.html#dep-info-files
 PROGRAM_ELF_DEPS = $(filter-out %: ,$(file < $(PROGRAM_ELF).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
@@ -55,7 +55,7 @@ RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
 
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) 
 
-COMPILER_ARGS = --target=$(TARGET)
+COMPILER_ARGS = --target=$(TARGET) --release
 
 RUSTC_CMD   = cargo rustc $(COMPILER_ARGS)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)

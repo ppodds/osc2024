@@ -37,3 +37,7 @@ pub fn exit(status: i32) {
 pub fn mbox_call(channel: u8, mbox: *mut u32) -> i32 {
     unsafe { system_call(6, channel as usize, mbox as usize, 0, 0, 0, 0) as i32 }
 }
+
+pub fn kill(pid: i32) {
+    unsafe { system_call(7, pid as usize, 0, 0, 0, 0, 0) };
+}

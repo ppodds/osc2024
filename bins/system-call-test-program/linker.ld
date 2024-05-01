@@ -1,6 +1,6 @@
 SECTIONS
 {
-  . = 0x8006000;
+  . = 0x821c000;
   .text : {
     KEEP(*(.text._start))
     *(.text._start_arguments)
