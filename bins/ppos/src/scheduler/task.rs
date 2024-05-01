@@ -2,12 +2,14 @@ use core::arch::asm;
 
 use aarch64_cpu::registers::Readable;
 use aarch64_cpu::registers::SP_EL0;
+use alloc::boxed::Box;
 use alloc::rc::Rc;
-use alloc::{boxed::Box, sync::Arc};
+use alloc::sync::Arc;
 use cpu::cpu::run_user_code;
 use cpu::thread::Thread;
 use library::sync::mutex::Mutex;
 
+use crate::pid::pid_manager;
 use crate::{
     memory::PAGE_SIZE,
     pid::{PIDNumber, PID},
@@ -53,13 +55,15 @@ pub struct Task {
 }
 
 impl Task {
+    const USER_STACK_SIZE: usize = PAGE_SIZE * 4;
+
     pub fn new(stack: StackInfo) -> Self {
         Self {
             thread: Thread::new(),
             state: TaskState::Running,
             kernel_stack: stack,
             user_stack: StackInfo::new(core::ptr::null_mut(), core::ptr::null_mut()),
-            pid: Arc::new(Mutex::new(PID::new())),
+            pid: pid_manager().new_pid(),
         }
     }
 
@@ -74,6 +78,8 @@ impl Task {
     }
 
     /// Fork a new task from the current task and return the child task pointer
+    /// This function should never be inlined because the stack is copied from the parent task to the child task
+    #[inline(never)]
     pub fn fork(&self, caller_sp: usize) -> *mut Task {
         // save return address
         let mut return_addr: usize = 0;
@@ -96,7 +102,7 @@ impl Task {
         // create a child task
         let mut task = Self::new(StackInfo::new(kernel_stack as *mut u8, kernel_stack_bottom));
         if has_user_stack {
-            let mut user_stack = Box::into_raw(Box::new([0_u8; PAGE_SIZE]));
+            let mut user_stack = Box::into_raw(Box::new([0_u8; Self::USER_STACK_SIZE]));
             let user_stack_bottom =
                 (user_stack as usize + (unsafe { *user_stack }).len()) as *mut u8;
             task.user_stack = StackInfo::new(user_stack as *mut u8, user_stack_bottom);
@@ -174,16 +180,28 @@ impl Task {
         panic!("Unreachable!")
     }
 
+    pub fn kill(&mut self) {
+        self.state = TaskState::Dead;
+        // let the idle task to clean up the task
+        // we can't clean up the task here because the task is still running
+        scheduler().schedule();
+        panic!("Unreachable!")
+    }
+
     #[inline(always)]
-    pub fn pid(&self) -> PIDNumber {
+    pub fn pid_number(&self) -> PIDNumber {
         self.pid.lock().unwrap().number()
+    }
+
+    #[inline(always)]
+    pub fn pid(&self) -> Arc<Mutex<PID>> {
+        self.pid.clone()
     }
 
     pub fn run_user_program(&mut self, user_program: *const fn() -> !) {
         let code_start = user_program as u64;
-        const USER_STACK_SIZE: usize = 4096;
-        let stack_top = Box::into_raw(Box::new([0_u8; USER_STACK_SIZE])) as u64;
-        let stack_bottom = stack_top + USER_STACK_SIZE as u64;
+        let stack_top = Box::into_raw(Box::new([0_u8; Self::USER_STACK_SIZE])) as u64;
+        let stack_bottom = stack_top + Self::USER_STACK_SIZE as u64;
         self.user_stack.top = stack_top as *mut u8;
         self.user_stack.bottom = stack_bottom as *mut u8;
         unsafe { run_user_code(stack_bottom, code_start) };

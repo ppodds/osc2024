@@ -19,6 +19,7 @@ use library::{
     println,
     sync::mutex::Mutex,
 };
+use pid::pid_manager;
 use scheduler::{round_robin_scheduler::ROUND_ROBIN_SCHEDULER, task::Task};
 use shell::Shell;
 
@@ -40,6 +41,7 @@ unsafe fn kernel_init() -> ! {
     memory::init_allocator();
     exception::handling_init();
     driver::init().unwrap();
+    pid_manager().init();
     scheduler::register_scheduler(&ROUND_ROBIN_SCHEDULER);
     mini_uart().change_mode(ConsoleMode::Async);
     enable_kernel_space_interrupt();

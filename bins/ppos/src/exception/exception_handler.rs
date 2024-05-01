@@ -124,8 +124,8 @@ extern "C" fn lower_aarch64_synchronous(e: &mut ExceptionContext) {
                 panic!("unknown ISS")
             }
         }
-        Some(_) => panic!("unhandled exception class"),
-        None => panic!("unsupport synchronous interrupt type"),
+        Some(_) => default_exception_handler(e),
+        None => default_exception_handler(e),
     }
 }
 

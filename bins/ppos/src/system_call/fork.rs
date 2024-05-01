@@ -14,6 +14,6 @@ pub fn fork() -> i32 {
     if current() == child {
         0
     } else {
-        (unsafe { &*child }).pid() as i32
+        (unsafe { &*child }).pid_number() as i32
     }
 }

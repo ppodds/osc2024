@@ -78,6 +78,12 @@ impl Scheduler for RoundRobinScheduler {
 
     fn add_task(&self, task: Rc<Mutex<Task>>) {
         unsafe { disable_kernel_space_interrupt() };
+        task.lock()
+            .unwrap()
+            .pid()
+            .lock()
+            .unwrap()
+            .set_pid_task(&task);
         self.run_queue.lock().unwrap().push_back(task);
         unsafe { enable_kernel_space_interrupt() };
     }
@@ -87,6 +93,13 @@ impl Scheduler for RoundRobinScheduler {
             phys_dram_start_addr() as *mut u8,
             phys_binary_load_addr() as *mut u8,
         ))));
+        idle_task
+            .lock()
+            .unwrap()
+            .pid()
+            .lock()
+            .unwrap()
+            .set_pid_task(&idle_task);
         let idle_task_ptr = &*idle_task.lock().unwrap() as *const Task;
         {
             let mut run_queue = self.run_queue.lock().unwrap();
