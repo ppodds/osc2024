@@ -3,7 +3,7 @@ use crate::{
     fork_test::fork_test,
     print, println,
     string::String,
-    system_call::{exit, get_pid, kill, mbox_call},
+    system_call::{exec, exit, get_pid, kill, mbox_call},
 };
 
 pub struct Shell {
@@ -50,7 +50,8 @@ impl Shell {
         println!("pid\t: print process PID");
         println!("fork-test\t: run fork test");
         println!("exit\t: exit the process");
-        println!("kill <pid>\t: kill a process")
+        println!("kill <pid>\t: kill a process");
+        println!("exec\t: execute system-call-test-program.img");
     }
 
     fn info(&self) {
@@ -116,6 +117,13 @@ impl Shell {
         kill(pid as i32);
     }
 
+    fn exec(&self) {
+        exec(
+            "system-call-test-program.img".as_ptr(),
+            0 as *const *const u8,
+        );
+    }
+
     fn execute_command(&mut self) {
         println!();
         let input = self.input.trim();
@@ -138,6 +146,7 @@ impl Shell {
                         println!("kill: missing argument");
                     }
                 }
+                "exec" => self.exec(),
                 "" => (),
                 cmd => println!("{}: command not found", cmd),
             }
