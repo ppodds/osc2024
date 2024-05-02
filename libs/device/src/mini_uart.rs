@@ -1,6 +1,7 @@
 use core::fmt;
 use core::fmt::Write;
 
+use alloc::collections::VecDeque;
 use tock_registers::{
     interfaces::{ReadWriteable, Readable, Writeable},
     register_bitfields, register_structs,
@@ -22,8 +23,8 @@ use library::{
 
 struct MiniUartInner {
     registers: MMIODerefWrapper<Registers>,
-    read_buffer: RingBuffer<{ Self::BUFFER_SIZE }>,
-    write_buffer: RingBuffer<{ Self::BUFFER_SIZE }>,
+    read_buffer: VecDeque<u8>,
+    write_buffer: VecDeque<u8>,
     mode: ConsoleMode,
 }
 
@@ -148,8 +149,8 @@ impl MiniUartInner {
     pub const unsafe fn new(mmio_start_addr: usize) -> Self {
         Self {
             registers: MMIODerefWrapper::new(mmio_start_addr),
-            read_buffer: RingBuffer::new(),
-            write_buffer: RingBuffer::new(),
+            read_buffer: VecDeque::new(),
+            write_buffer: VecDeque::new(),
             mode: ConsoleMode::Sync,
         }
     }
@@ -222,7 +223,7 @@ impl MiniUartInner {
         // critical section
         // read buffer is shared between interrupt handlers
         self.disable_read_interrupt();
-        let c = self.read_buffer.pop();
+        let c = self.read_buffer.pop_front();
         self.enable_read_interrupt();
         c
     }
@@ -231,7 +232,7 @@ impl MiniUartInner {
         // critical section
         // write buffer is shared between interrupt handlers
         self.disable_write_interrupt();
-        self.write_buffer.push(value);
+        self.write_buffer.push_back(value);
         self.enable_write_interrupt();
     }
 
@@ -274,7 +275,7 @@ impl MiniUartInner {
                 // if nothing to write, disable write interrupt
                 // or it will keep firing and racing cpu
                 self.disable_write_interrupt();
-                if let Some(byte) = self.write_buffer.pop() {
+                if let Some(byte) = self.write_buffer.pop_front() {
                     self.write_byte(byte);
                     self.enable_write_interrupt();
                 }
@@ -282,7 +283,7 @@ impl MiniUartInner {
             Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::RECEIVER_HOLDS_VAILD_BYTE) => {
                 self.disable_read_interrupt();
                 let byte = self.read_byte();
-                self.read_buffer.push(byte);
+                self.read_buffer.push_back(byte);
                 self.enable_read_interrupt();
             }
             None => panic!("Invalid interrupt"),
