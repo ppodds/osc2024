@@ -5,7 +5,10 @@ mod exit;
 mod fork;
 mod get_pid;
 mod kill;
+mod kill_with_signal;
 mod mbox_call;
+mod sig_return;
+mod signal;
 mod uart_read;
 mod uart_write;
 
@@ -18,6 +21,9 @@ pub enum SystemCallNumber {
     Exit,
     MBoxCall,
     Kill,
+    Signal,
+    KillWithSignal,
+    SignalReturn,
 }
 
 impl From<u64> for SystemCallNumber {
@@ -31,6 +37,9 @@ impl From<u64> for SystemCallNumber {
             5 => SystemCallNumber::Exit,
             6 => SystemCallNumber::MBoxCall,
             7 => SystemCallNumber::Kill,
+            8 => SystemCallNumber::Signal,
+            9 => SystemCallNumber::KillWithSignal,
+            10 => SystemCallNumber::SignalReturn,
             _ => panic!("unsupport system call number"),
         }
     }
@@ -62,7 +71,25 @@ pub fn system_call(
             kill::kill(arg0 as i32);
             0
         }
-        _ => panic!("unsupport system call number"),
+        SystemCallNumber::Signal => {
+            let handler = unsafe {
+                core::mem::transmute::<*const fn() -> !, fn() -> !>(arg1 as *const fn() -> !)
+            };
+            signal::signal(arg0 as i32, handler);
+            0
+        }
+        SystemCallNumber::KillWithSignal => {
+            kill_with_signal::kill_with_signal(arg0 as i32, arg1 as i32);
+            0
+        }
+        SystemCallNumber::SignalReturn => {
+            sig_return::sig_return();
+            0
+        }
+        _ => panic!(
+            "unsupport system call number: {}",
+            context.system_call_number()
+        ),
     };
     context.set_return_value(result as u64);
 }

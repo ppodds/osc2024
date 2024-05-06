@@ -3,7 +3,7 @@ use crate::{
     fork_test::fork_test,
     print, println,
     string::String,
-    system_call::{exec, exit, get_pid, kill, mbox_call},
+    system_call::{exec, exit, get_pid, kill, kill_with_signal, mbox_call, signal},
 };
 
 pub struct Shell {
@@ -52,6 +52,8 @@ impl Shell {
         println!("exit\t: exit the process");
         println!("kill <pid>\t: kill a process");
         println!("exec\t: execute system-call-test-program.img");
+        println!("register\t: register the kill signal handler");
+        println!("kill-with-signal <pid>\t: send a kill signal to a process");
     }
 
     fn info(&self) {
@@ -124,6 +126,14 @@ impl Shell {
         );
     }
 
+    fn register(&self) {
+        signal(9, kill_signal_handler);
+    }
+
+    fn kill_with_signal(&self, pid: i32) {
+        kill_with_signal(pid, 9);
+    }
+
     fn execute_command(&mut self) {
         println!();
         let input = self.input.trim();
@@ -147,7 +157,18 @@ impl Shell {
                     }
                 }
                 "exec" => self.exec(),
-                "" => (),
+                "register" => self.register(),
+                "kill-with-signal" => {
+                    if let Some(pid) = split_result.next() {
+                        if let Ok(pid) = pid.parse::<i32>() {
+                            self.kill_with_signal(pid);
+                        } else {
+                            println!("kill-with-signal: invalid argument");
+                        }
+                    } else {
+                        println!("kill-with-signal: missing argument");
+                    }
+                }
                 cmd => println!("{}: command not found", cmd),
             }
         }
@@ -168,4 +189,8 @@ impl Shell {
         // then move the cursor back again
         print!("\x08 \x08");
     }
+}
+
+fn kill_signal_handler() {
+    println!("kill signal received");
 }

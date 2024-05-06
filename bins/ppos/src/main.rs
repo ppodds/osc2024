@@ -9,6 +9,7 @@ mod memory;
 mod pid;
 mod scheduler;
 mod shell;
+mod signal;
 mod system_call;
 
 use alloc::rc::Rc;

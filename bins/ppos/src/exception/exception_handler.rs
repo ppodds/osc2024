@@ -3,12 +3,16 @@
 // Copyright (c) 2018-2023 Andre Richter <andre.o.richter@gmail.com>
 
 use aarch64_cpu::registers::*;
-use core::fmt;
+use core::{arch::asm, fmt};
 use cpu::cpu::enable_kernel_space_interrupt;
 use device::interrupt_manager;
+use library::{
+    console::{console, ConsoleMode},
+    println,
+};
 use tock_registers::{interfaces::Readable, registers::InMemoryRegister};
 
-use crate::system_call::system_call;
+use crate::{scheduler::current, system_call::system_call};
 
 //--------------------------------------------------------------------------------------------------
 // Private Definitions
@@ -127,11 +131,13 @@ extern "C" fn lower_aarch64_synchronous(e: &mut ExceptionContext) {
         Some(_) => default_exception_handler(e),
         None => default_exception_handler(e),
     }
+    unsafe { &mut *current() }.do_pending_signal();
 }
 
 #[no_mangle]
 extern "C" fn lower_aarch64_irq(e: &mut ExceptionContext) {
     interrupt_manager::interrupt_manager().handle_pending_interrupt();
+    unsafe { &mut *current() }.do_pending_signal();
 }
 
 #[no_mangle]

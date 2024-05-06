@@ -16,6 +16,26 @@ pub struct CPUContext {
     pub pc: u64,
 }
 
+impl CPUContext {
+    pub const fn new() -> Self {
+        Self {
+            x19: 0,
+            x20: 0,
+            x21: 0,
+            x22: 0,
+            x23: 0,
+            x24: 0,
+            x25: 0,
+            x26: 0,
+            x27: 0,
+            x28: 0,
+            fp: 0,
+            sp: 0,
+            pc: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct SoftwareThreadRegisters {
@@ -36,21 +56,7 @@ pub struct Thread {
 impl Thread {
     pub const fn new() -> Self {
         Self {
-            context: CPUContext {
-                x19: 0,
-                x20: 0,
-                x21: 0,
-                x22: 0,
-                x23: 0,
-                x24: 0,
-                x25: 0,
-                x26: 0,
-                x27: 0,
-                x28: 0,
-                fp: 0,
-                sp: 0,
-                pc: 0,
-            },
+            context: CPUContext::new(),
             software_thread_registers: SoftwareThreadRegisters {
                 tpidr_el1: 0,
                 tpidr_el0: 0,

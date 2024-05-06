@@ -1,3 +1,9 @@
+use crate::{
+    common::MMIODerefWrapper,
+    device_driver::DeviceDriver,
+    interrupt_controller::InterruptNumber,
+    interrupt_manager::{self, InterruptHandler, InterruptHandlerDescriptor, InterruptPrehook},
+};
 use aarch64_cpu::registers::*;
 use alloc::{boxed::Box, collections::VecDeque};
 use core::time::Duration;
@@ -5,13 +11,6 @@ use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::sync::mutex::Mutex;
 use tock_registers::{
     interfaces::ReadWriteable as _, register_bitfields, register_structs, registers::ReadWrite,
-};
-
-use crate::{
-    common::MMIODerefWrapper,
-    device_driver::DeviceDriver,
-    interrupt_controller::InterruptNumber,
-    interrupt_manager::{self, InterruptHandler, InterruptHandlerDescriptor, InterruptPrehook},
 };
 
 register_bitfields! [
@@ -96,6 +95,7 @@ impl Timer {
     #[inline(always)]
     pub fn enable_timer_interrupt(&self) {
         CNTP_CTL_EL0.write(CNTP_CTL_EL0::ENABLE::SET + CNTP_CTL_EL0::IMASK::CLEAR);
+        CNTKCTL_EL1.modify_no_read(CNTKCTL_EL1.extract(), CNTKCTL_EL1::EL0PCTEN::TrappedNone);
         self.core_timer_interrupt_controll_registers
             .lock()
             .unwrap()

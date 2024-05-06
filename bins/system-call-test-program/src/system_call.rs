@@ -41,3 +41,11 @@ pub fn mbox_call(channel: u8, mbox: *mut u32) -> i32 {
 pub fn kill(pid: i32) {
     unsafe { system_call(7, pid as usize, 0, 0, 0, 0, 0) };
 }
+
+pub fn signal(signal: i32, handler: fn()) {
+    unsafe { system_call(8, signal as usize, handler as usize, 0, 0, 0, 0) };
+}
+
+pub fn kill_with_signal(pid: i32, signal: i32) {
+    unsafe { system_call(9, pid as usize, signal as usize, 0, 0, 0, 0) };
+}
