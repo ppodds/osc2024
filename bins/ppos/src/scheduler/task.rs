@@ -9,7 +9,6 @@ use aarch64_cpu::registers::SCTLR_EL1::C;
 use aarch64_cpu::registers::SP_EL0;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
-use alloc::sync::Arc;
 use cpu::cpu::run_user_code;
 use cpu::thread::CPUContext;
 use cpu::thread::Thread;
@@ -70,7 +69,7 @@ pub struct Task {
     state: TaskState,
     kernel_stack: StackInfo,
     user_stack: StackInfo,
-    pid: Arc<Mutex<PID>>,
+    pid: Rc<Mutex<PID>>,
     signal_handlers: [Option<fn() -> !>; Signal::Max as usize],
     /// The signals that are pending for the task, represented as a bitfield.
     pending_signals: u32,
@@ -217,7 +216,7 @@ impl Task {
     }
 
     #[inline(always)]
-    pub fn pid(&self) -> Arc<Mutex<PID>> {
+    pub fn pid(&self) -> Rc<Mutex<PID>> {
         self.pid.clone()
     }
 

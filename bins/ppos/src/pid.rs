@@ -1,4 +1,4 @@
-use alloc::{rc::Rc, sync::Arc};
+use alloc::rc::Rc;
 use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use hashbrown::HashMap;
 use library::sync::mutex::Mutex;
@@ -40,7 +40,7 @@ impl PID {
 }
 
 struct PIDManagerInner {
-    map: Mutex<HashMap<PIDNumber, Arc<Mutex<PID>>>>,
+    map: Mutex<HashMap<PIDNumber, Rc<Mutex<PID>>>>,
     current_pid: Mutex<PIDNumber>,
 }
 
@@ -52,10 +52,10 @@ impl PIDManagerInner {
         }
     }
 
-    fn new_pid(&self) -> Arc<Mutex<PID>> {
+    fn new_pid(&self) -> Rc<Mutex<PID>> {
         unsafe { disable_kernel_space_interrupt() };
         let mut current_pid = self.current_pid.lock().unwrap();
-        let pid = Arc::new(Mutex::new(PID {
+        let pid = Rc::new(Mutex::new(PID {
             number: *current_pid,
             tasks: [None, None, None, None],
         }));
@@ -65,7 +65,7 @@ impl PIDManagerInner {
         pid
     }
 
-    fn get_pid(&self, pid: PIDNumber) -> Option<Arc<Mutex<PID>>> {
+    fn get_pid(&self, pid: PIDNumber) -> Option<Rc<Mutex<PID>>> {
         self.map.lock().unwrap().get(&pid).map(|pid| pid.clone())
     }
 }
@@ -85,11 +85,11 @@ impl PIDManager {
         *self.inner.lock().unwrap() = Some(PIDManagerInner::new());
     }
 
-    pub fn new_pid(&self) -> Arc<Mutex<PID>> {
+    pub fn new_pid(&self) -> Rc<Mutex<PID>> {
         self.inner.lock().unwrap().as_ref().unwrap().new_pid()
     }
 
-    pub fn get_pid(&self, pid: PIDNumber) -> Option<Arc<Mutex<PID>>> {
+    pub fn get_pid(&self, pid: PIDNumber) -> Option<Rc<Mutex<PID>>> {
         self.inner.lock().unwrap().as_ref().unwrap().get_pid(pid)
     }
 }
