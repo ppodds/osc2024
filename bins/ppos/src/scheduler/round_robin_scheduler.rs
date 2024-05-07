@@ -21,6 +21,7 @@ use super::{
 pub struct RoundRobinScheduler {
     run_queue: Mutex<VecDeque<Rc<Mutex<Task>>>>,
     wait_queue: Mutex<LinkedList<Rc<Mutex<Task>>>>,
+    initialized: Mutex<bool>,
 }
 
 impl RoundRobinScheduler {
@@ -28,6 +29,7 @@ impl RoundRobinScheduler {
         Self {
             run_queue: Mutex::new(VecDeque::new()),
             wait_queue: Mutex::new(LinkedList::new()),
+            initialized: Mutex::new(false),
         }
     }
 }
@@ -50,30 +52,37 @@ impl RoundRobinScheduler {
                 unsafe { enable_kernel_space_interrupt() };
                 i += 1;
             }
-            self.schedule();
+            self._schedule();
+        }
+    }
+
+    /// Schedule the next task to run
+    /// Caller should ensure the interrupt is enabled after context switch
+    fn _schedule(&self) -> *mut Task {
+        loop {
+            // protect the scheduler from being interrupted
+            unsafe { disable_kernel_space_interrupt() };
+            if let Some(mut next_task) = self.run_queue.lock().unwrap().pop_front() {
+                let next_task_state = next_task.lock().unwrap().state();
+                let next = &mut *next_task.lock().unwrap() as *mut Task;
+                self.run_queue.lock().unwrap().push_back(next_task);
+                if next_task_state == TaskState::Running {
+                    return unsafe { switch_to(current(), next) };
+                }
+            } else {
+                unsafe { enable_kernel_space_interrupt() };
+                panic!("No task to run!");
+            }
         }
     }
 }
 
 impl Scheduler for RoundRobinScheduler {
     fn schedule(&self) -> *mut Task {
-        // protect the scheduler from being interrupted
         unsafe { disable_kernel_space_interrupt() };
-        if let Some(mut next_task) = self.run_queue.lock().unwrap().pop_front() {
-            let next_task_state = next_task.lock().unwrap().state();
-            let next = &mut *next_task.lock().unwrap() as *mut Task;
-            self.run_queue.lock().unwrap().push_back(next_task);
-            if next_task_state == TaskState::Dead {
-                unsafe { enable_kernel_space_interrupt() };
-                // if the task is dead, skip the job
-                return self.schedule();
-            }
-            unsafe { enable_kernel_space_interrupt() };
-            unsafe { switch_to(current(), next) }
-        } else {
-            unsafe { enable_kernel_space_interrupt() };
-            panic!("No task to run!");
-        }
+        let next = self._schedule();
+        unsafe { enable_kernel_space_interrupt() };
+        next
     }
 
     fn add_task(&self, task: Rc<Mutex<Task>>) {
@@ -112,6 +121,8 @@ impl Scheduler for RoundRobinScheduler {
             timer().tick_per_second() >> 5,
             Box::new(scheduler_timer_handler),
         );
+        self._schedule();
+        *self.initialized.lock().unwrap() = true;
         self.idle();
     }
 
@@ -136,6 +147,10 @@ impl Scheduler for RoundRobinScheduler {
         self.run_queue.lock().unwrap().push_front(t);
         unsafe { enable_kernel_space_interrupt() };
         unsafe { run_user_code(stack_end, code_start) };
+    }
+
+    fn initialized(&self) -> bool {
+        *self.initialized.lock().unwrap()
     }
 }
 

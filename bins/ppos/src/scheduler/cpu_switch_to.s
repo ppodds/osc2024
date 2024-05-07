@@ -24,6 +24,9 @@ cpu_switch_to:
     ldp fp, x9, [x8, 16 * 5]
     ldr lr, [x8, 16 * 6]
     mov sp,  x9
+    
+    // ensure kernel space interrupt is enable
+    msr DAIFClr, 0xf
     ret
 
 .global cpu_switch_to

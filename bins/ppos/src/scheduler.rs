@@ -11,7 +11,7 @@ use self::task::Task;
 pub mod round_robin_scheduler;
 pub mod task;
 
-global_asm!(include_str!("scheduler/switch_to.s"));
+global_asm!(include_str!("scheduler/cpu_switch_to.s"));
 
 extern "C" {
     fn cpu_switch_to(prev: *mut Task, next: *mut Task) -> *mut Task;
@@ -44,13 +44,20 @@ pub fn current() -> *mut Task {
 }
 
 pub trait Scheduler {
+    /// Schedule the next task to run when the timer interrupt occurs.
     fn schedule(&self) -> *mut Task;
 
+    /// Add a task to the scheduler.
     fn add_task(&self, task: Rc<Mutex<Task>>);
 
+    /// Start the scheduler main loop.
     fn start_scheduler(&self) -> !;
 
+    /// Execute a user space task.
     fn execute_task(&self, task: Task);
+
+    /// Use to check if the scheduler is initialized.
+    fn initialized(&self) -> bool;
 }
 
 struct NullScheduler {}
@@ -76,6 +83,10 @@ impl Scheduler for NullScheduler {
 
     fn execute_task(&self, task: Task) {
         unimplemented!()
+    }
+
+    fn initialized(&self) -> bool {
+        false
     }
 }
 

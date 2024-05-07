@@ -9,6 +9,8 @@ use aarch64_cpu::registers::SCTLR_EL1::C;
 use aarch64_cpu::registers::SP_EL0;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
+use cpu::cpu::disable_kernel_space_interrupt;
+use cpu::cpu::enable_kernel_space_interrupt;
 use cpu::cpu::run_user_code;
 use cpu::thread::CPUContext;
 use cpu::thread::Thread;
@@ -238,6 +240,7 @@ impl Task {
     }
 
     pub fn do_pending_signal(&mut self) {
+        unsafe { disable_kernel_space_interrupt() }
         if self.doing_signal {
             return;
         }
@@ -245,11 +248,13 @@ impl Task {
         for i in 0..Signal::Max as usize {
             if self.pending_signals & (1 << i) != 0 {
                 if let Some(handler) = self.signal_handlers[i] {
+                    unsafe { enable_kernel_space_interrupt() }
                     // create a new user stack
                     let mut signal_stack = Box::into_raw(Box::new([0_u8; Self::USER_STACK_SIZE]));
                     let signal_stack_end = signal_stack as u64 + Self::USER_STACK_SIZE as u64;
                     // save the current context
                     let mut context = CPUContext::new();
+                    unsafe { disable_kernel_space_interrupt() }
                     unsafe { store_context(&mut context as *mut CPUContext) };
                     // the saved context resume from here
                     self.signal_saved_context = Some((SP_EL0.get(), context));
@@ -267,13 +272,16 @@ impl Task {
                             );
                             // clear the pending signal
                             self.pending_signals &= !(1 << i);
+                            unsafe { enable_kernel_space_interrupt() }
                             run_user_code(
                                 (signal_stack_end as usize - size_of::<fn() -> !>()) as u64,
                                 signal_hander_wrapper as u64,
                             )
                         };
                     }
+                    unsafe { enable_kernel_space_interrupt() }
                 } else {
+                    unsafe { enable_kernel_space_interrupt() }
                     match Signal::from(i) {
                         Signal::SIGHUP => todo!(),
                         Signal::SIGINT => todo!(),
