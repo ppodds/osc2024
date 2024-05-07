@@ -267,14 +267,15 @@ impl Task {
                         unsafe {
                             // write the handler to the stack
                             core::ptr::write(
-                                (signal_stack_end as usize) as *mut fn() -> !,
+                                (signal_stack_end as usize - (2 * size_of::<fn() -> !>()))
+                                    as *mut fn() -> !,
                                 handler,
                             );
                             // clear the pending signal
                             self.pending_signals &= !(1 << i);
                             unsafe { enable_kernel_space_interrupt() }
                             run_user_code(
-                                (signal_stack_end as usize - size_of::<fn() -> !>()) as u64,
+                                (signal_stack_end as usize - (2 * size_of::<fn() -> !>())) as u64,
                                 signal_hander_wrapper as u64,
                             )
                         };
@@ -327,7 +328,7 @@ fn child_entry() {
 fn signal_hander_wrapper() -> ! {
     unsafe {
         asm!(
-            "ldr x0, [sp, 8]
+            "ldr x0, [sp]
         blr x0
         mov x8, 10
         svc 0"

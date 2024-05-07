@@ -7,7 +7,7 @@ use crate::scheduler::{current, task::Task};
 
 #[inline(never)]
 pub fn sig_return() {
-    let signal_stack_context_addr = SP_EL0.get() as usize + size_of::<fn() -> !>();
+    let signal_stack_context_addr = SP_EL0.get() as usize + 2 * size_of::<fn() -> !>();
     let signal_stack = signal_stack_context_addr - Task::USER_STACK_SIZE;
     // release the signal stack
     unsafe {
