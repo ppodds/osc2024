@@ -1,5 +1,5 @@
-use crate::scheduler::task::Task;
+use crate::scheduler::current;
 
 pub fn exit() {
-    Task::exit(0);
+    unsafe { &mut *current() }.exit(0);
 }

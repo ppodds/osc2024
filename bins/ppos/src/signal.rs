@@ -37,5 +37,5 @@ impl From<usize> for Signal {
 }
 
 pub fn default_kill_handler() {
-    (unsafe { &mut *current() }).kill();
+    (unsafe { &mut *current() }).exit(0);
 }

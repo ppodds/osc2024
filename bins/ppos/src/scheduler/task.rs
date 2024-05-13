@@ -1,5 +1,6 @@
 use core::arch::asm;
 use core::arch::global_asm;
+use core::hint;
 use core::mem::size_of;
 
 use aarch64_cpu::asm::barrier;
@@ -176,6 +177,7 @@ impl Task {
                 return_addr,
             );
         }
+        task.signal_handlers = self.signal_handlers.clone();
         let task = Rc::new(Mutex::new(task));
         let task_ptr = &mut *task.lock().unwrap() as *mut Task;
         scheduler().add_task(task);
@@ -195,21 +197,26 @@ impl Task {
     /**
      * Leave the kernel thread and return to the scheduler
      */
-    pub fn exit(code: usize) -> ! {
-        let current = unsafe { &mut *current() };
-        current.state = TaskState::Dead;
+    pub fn exit(&mut self, code: usize) -> ! {
+        self.state = TaskState::Dead;
         // let the idle task to clean up the task
         // we can't clean up the task here because the task is still running
         scheduler().schedule();
         panic!("Unreachable!")
     }
 
-    pub fn kill(&mut self) {
-        self.state = TaskState::Dead;
-        // let the idle task to clean up the task
-        // we can't clean up the task here because the task is still running
-        scheduler().schedule();
-        panic!("Unreachable!")
+    pub fn kill(pid: PIDNumber) {
+        unsafe { disable_kernel_space_interrupt() }
+        if let Some(pid) = pid_manager().get_pid(pid as usize) {
+            pid.lock()
+                .unwrap()
+                .pid_task()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .state = TaskState::Dead;
+        }
+        unsafe { enable_kernel_space_interrupt() }
     }
 
     #[inline(always)]
