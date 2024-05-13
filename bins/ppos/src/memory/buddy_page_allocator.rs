@@ -1,4 +1,4 @@
-use core::{alloc::GlobalAlloc, array};
+use core::{alloc::GlobalAlloc, array, fmt};
 
 use library::{println, sync::mutex::Mutex};
 
@@ -259,6 +259,54 @@ impl<'a> BuddyPageAllocator<'a> {
                 }
                 cur = next;
             }
+        }
+        Ok(())
+    }
+}
+
+impl<'a> fmt::Display for BuddyPageAllocator<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "BuddyPageAllocator: {:#x}..{:#x}",
+            self.boundary.lock().unwrap().0,
+            self.boundary.lock().unwrap().1
+        )?;
+        writeln!(f, "===============");
+        for (i, list) in self
+            .frame_free_list
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            writeln!(f, "Order {}:", i)?;
+            if let Some(head) = list.head() {
+                let mut current = unsafe { &*head };
+                let mut start = self.boundary.lock().unwrap().0 + current.frame_index() * PAGE_SIZE;
+                let size = (1 << i) * PAGE_SIZE;
+                writeln!(
+                    f,
+                    "  Frame index: {} ({:#x}..{:#x})",
+                    current.frame_index(),
+                    start,
+                    start + size
+                )?;
+                while let Some(cur) = current.next() {
+                    current = unsafe { &*cur };
+                    start = self.boundary.lock().unwrap().0 + current.frame_index() * PAGE_SIZE;
+                    writeln!(
+                        f,
+                        "  Frame index: {} ({:#x}..{:#x})",
+                        current.frame_index(),
+                        start,
+                        start + size
+                    )?;
+                }
+            }
+            writeln!(f, "===============");
         }
         Ok(())
     }
