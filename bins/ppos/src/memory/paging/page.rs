@@ -165,6 +165,40 @@ impl PageDescriptor {
     }
 }
 
+trait StartAddr {
+    fn phys_start_addr_u64(&self) -> u64;
+    fn phys_start_addr_usize(&self) -> usize;
+}
+
+impl<T, const N: usize> StartAddr for [T; N] {
+    fn phys_start_addr_u64(&self) -> u64 {
+        self.as_ptr() as u64
+    }
+
+    fn phys_start_addr_usize(&self) -> usize {
+        self.as_ptr() as usize
+    }
+}
+
+pub struct TranslationGranule<const GRANULE_SIZE: usize>;
+
+impl<const GRANULE_SIZE: usize> TranslationGranule<GRANULE_SIZE> {
+    /// The granule's size.
+    pub const SIZE: usize = Self::size_checked();
+
+    /// The granule's shift, aka log2(size).
+    pub const SHIFT: usize = Self::SIZE.trailing_zeros() as usize;
+
+    const fn size_checked() -> usize {
+        assert!(GRANULE_SIZE.is_power_of_two());
+        GRANULE_SIZE
+    }
+}
+
+pub type Granule1GiB = TranslationGranule<{ 1 * 1024 * 1024 * 1024 }>;
+pub type Granule2MiB = TranslationGranule<{ 2 * 1024 * 1024 }>;
+pub type Granule4KiB = TranslationGranule<{ 4 * 1024 }>;
+
 const NUM_TABLES: usize = 4096 / size_of::<PageDescriptor>();
 
 #[repr(C)]
@@ -178,19 +212,35 @@ pub struct FixedSizeTranslationTable {
 }
 
 impl FixedSizeTranslationTable {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            pgd: array::from_fn(|i| {
-                TableDescriptor::from_next_level_table_addr(0x2000 + i * 0x1000)
-            }),
-            pud: array::from_fn(|i| {
-                TableDescriptor::from_next_level_table_addr(0x3000 + i * 0x1000)
-            }),
-            pmd: array::from_fn(|i| {
-                array::from_fn(|j| {
-                    BlockDescriptor::from_output_addr(i * NUM_TABLES * 0x200000 + j * 0x200000)
-                })
-            }),
+            pgd: [TableDescriptor::new(); NUM_TABLES],
+            pud: [TableDescriptor::new(); NUM_TABLES],
+            pmd: [[BlockDescriptor::new(); NUM_TABLES]; 2],
         }
     }
+
+    pub fn populate_table_entries(&mut self) {
+        self.pgd = array::from_fn(|i| {
+            TableDescriptor::from_next_level_table_addr(
+                self.pud.phys_start_addr_usize() + i * 0x1000,
+            )
+        });
+        self.pud = array::from_fn(|i| {
+            TableDescriptor::from_next_level_table_addr(
+                self.pmd.phys_start_addr_usize() + i * 0x1000,
+            )
+        });
+        self.pmd = array::from_fn(|i| {
+            array::from_fn(|j| {
+                BlockDescriptor::from_output_addr(i << Granule1GiB::SHIFT | j << Granule2MiB::SHIFT)
+            })
+        });
+    }
+
+    pub fn phys_base_address(&self) -> u64 {
+        self.pgd.phys_start_addr_u64()
+    }
 }
+
+pub type KernelTranslationTable = FixedSizeTranslationTable;

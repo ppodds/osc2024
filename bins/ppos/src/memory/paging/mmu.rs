@@ -1,7 +1,7 @@
 use aarch64_cpu::{asm::barrier, registers::*};
 use tock_registers::interfaces::ReadWriteable;
 
-use super::page::FixedSizeTranslationTable;
+use super::page::KernelTranslationTable;
 
 pub struct MemoryManagementUnit {}
 
@@ -12,8 +12,8 @@ impl MemoryManagementUnit {
     pub unsafe fn enable_mmu(&self) {
         self.setup_mair();
         self.setup_page_table();
-        TTBR0_EL1.set(0x1000);
-        TTBR1_EL1.set(0x1000);
+        TTBR0_EL1.set(KERNEL_TRANSLATION_TABLE.phys_base_address());
+        TTBR1_EL1.set(KERNEL_TRANSLATION_TABLE.phys_base_address());
         self.setup_translation_controll();
         barrier::isb(barrier::SY);
         self.enable_translation();
@@ -46,10 +46,7 @@ impl MemoryManagementUnit {
 
     #[inline(always)]
     unsafe fn setup_page_table(&self) {
-        core::ptr::write_volatile(
-            0x1000 as *mut FixedSizeTranslationTable,
-            FixedSizeTranslationTable::new(),
-        );
+        KERNEL_TRANSLATION_TABLE.populate_table_entries();
     }
 }
 
@@ -58,3 +55,5 @@ static MMU: MemoryManagementUnit = MemoryManagementUnit {};
 pub fn mmu() -> &'static MemoryManagementUnit {
     &MMU
 }
+
+static mut KERNEL_TRANSLATION_TABLE: KernelTranslationTable = KernelTranslationTable::new();
