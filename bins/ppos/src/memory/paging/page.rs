@@ -1,7 +1,8 @@
 use core::{array, mem::size_of};
 
 use aarch64_cpu::registers::*;
-use tock_registers::{register_bitfields, registers::InMemoryRegister};
+use bsp::memory::PERIPHERAL_MMIO_BASE;
+use tock_registers::{interfaces::ReadWriteable, register_bitfields, registers::InMemoryRegister};
 
 register_bitfields! [
     u64,
@@ -138,6 +139,11 @@ impl TableDescriptor {
     }
 }
 
+pub enum MemoryAttribute {
+    Device,
+    Normal,
+}
+
 /// A page descriptor.
 ///
 /// The output points to physical memory.
@@ -161,6 +167,15 @@ impl PageDescriptor {
                 + PAGE_DESCRIPTOR::VALID::True,
         );
         Self { value: val.get() }
+    }
+
+    pub fn set_memory_attr(&mut self, attr: MemoryAttribute) {
+        let val = InMemoryRegister::<u64, PAGE_DESCRIPTOR::Register>::new(self.value);
+        match attr {
+            MemoryAttribute::Device => val.modify(PAGE_DESCRIPTOR::AttrIndx.val(0)),
+            MemoryAttribute::Normal => val.modify(PAGE_DESCRIPTOR::AttrIndx.val(1)),
+        }
+        self.value = val.get();
     }
 }
 
@@ -245,10 +260,16 @@ impl FixedSizeTranslationTable {
         // stack size is not enough to use array::from_fn
         for i in 0..2 {
             for (j, pmd) in self.pmd[i].iter().enumerate() {
-                for (k, pt) in self.pt[i][j].iter_mut().enumerate() {
-                    *pt = PageDescriptor::from_output_addr(
-                        i << Granule1GiB::SHIFT | j << Granule2MiB::SHIFT | k << Granule4KiB::SHIFT,
-                    );
+                for (k, pte) in self.pt[i][j].iter_mut().enumerate() {
+                    let virt_addr =
+                        i << Granule1GiB::SHIFT | j << Granule2MiB::SHIFT | k << Granule4KiB::SHIFT;
+                    let mut t = PageDescriptor::from_output_addr(virt_addr);
+                    if virt_addr >= PERIPHERAL_MMIO_BASE {
+                        t.set_memory_attr(MemoryAttribute::Device);
+                    } else {
+                        t.set_memory_attr(MemoryAttribute::Normal);
+                    }
+                    *pte = t;
                 }
             }
         }
