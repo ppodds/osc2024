@@ -232,13 +232,13 @@ impl FixedSizeTranslationTable {
             // we only need 2 pud entries
             // so just ignore the rest invalid entries
             TableDescriptor::from_next_level_table_addr(
-                self.pmd.phys_start_addr_usize() + i * 0x1000,
+                self.pmd.phys_start_addr_usize() + i * Granule4KiB::SIZE,
             )
         });
         self.pmd = array::from_fn(|i| {
             array::from_fn(|j| {
                 TableDescriptor::from_next_level_table_addr(
-                    self.pt.phys_start_addr_usize() + i * NUM_TABLES * 0x1000 + j * 0x1000,
+                    self.pt.phys_start_addr_usize() + i * Granule2MiB::SIZE + j * Granule4KiB::SIZE,
                 )
             })
         });
