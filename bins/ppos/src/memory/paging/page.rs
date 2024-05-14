@@ -3,9 +3,6 @@ use core::{array, mem::size_of};
 use aarch64_cpu::registers::*;
 use tock_registers::{register_bitfields, registers::InMemoryRegister};
 
-pub const PD_TABLE: u64 = 0b11;
-pub const PD_BLOCK: u64 = 0b01;
-
 register_bitfields! [
     u64,
     TABLE_DESCRIPTOR [
@@ -24,9 +21,26 @@ register_bitfields! [
 
 register_bitfields! [
     u64,
-    BLOCK_DESCRIPTOR [
+    BLOCK_DESCRIPTOR_2MB [
         /// Physical address of the next descriptor.
-        NEXT_LEVEL_TABLE_ADDR OFFSET(21) NUMBITS(27) [], // [47:21]
+        BLOCK_ADDR OFFSET(21) NUMBITS(27) [], // [47:21]
+        /// Access flag.
+        AF OFFSET(10) NUMBITS(1) [
+            False = 0,
+            True = 1
+        ],
+        TYPE OFFSET(1) NUMBITS(1) [
+            Block = 0,
+            Table = 1
+        ],
+        VALID OFFSET(0) NUMBITS(1) [
+            False = 0,
+            True = 1
+        ]
+    ],
+    BLOCK_DESCRIPTOR_4KB [
+        /// Physical address of the next descriptor.
+        BLOCK_ADDR OFFSET(12) NUMBITS(36) [], // [47:12]
         /// Access flag.
         AF OFFSET(10) NUMBITS(1) [
             False = 0,
@@ -111,29 +125,14 @@ impl TableDescriptor {
         );
         Self { value: val.get() }
     }
-}
 
-/// A block descriptor.
-///
-/// The output points to the block.
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct BlockDescriptor {
-    value: u64,
-}
-
-impl BlockDescriptor {
-    pub const fn new() -> Self {
-        Self { value: 0 }
-    }
-
-    pub fn from_output_addr(addr: usize) -> Self {
-        let val = InMemoryRegister::<u64, BLOCK_DESCRIPTOR::Register>::new(0);
+    pub fn from_2mb_block_addr(addr: usize) -> Self {
+        let val = InMemoryRegister::<u64, BLOCK_DESCRIPTOR_2MB::Register>::new(0);
         val.write(
-            BLOCK_DESCRIPTOR::NEXT_LEVEL_TABLE_ADDR.val(addr as u64 >> 21)
-                + BLOCK_DESCRIPTOR::AF::True
-                + BLOCK_DESCRIPTOR::TYPE::Block
-                + BLOCK_DESCRIPTOR::VALID::True,
+            BLOCK_DESCRIPTOR_2MB::BLOCK_ADDR.val(addr as u64 >> 21)
+                + BLOCK_DESCRIPTOR_2MB::AF::True
+                + BLOCK_DESCRIPTOR_2MB::TYPE::Block
+                + BLOCK_DESCRIPTOR_2MB::VALID::True,
         );
         Self { value: val.get() }
     }
@@ -156,7 +155,7 @@ impl PageDescriptor {
     pub fn from_output_addr(addr: usize) -> Self {
         let val = InMemoryRegister::<u64, PAGE_DESCRIPTOR::Register>::new(0);
         val.write(
-            PAGE_DESCRIPTOR::OUTPUT_ADDR.val(addr as u64 >> 21)
+            PAGE_DESCRIPTOR::OUTPUT_ADDR.val(addr as u64 >> 12)
                 + PAGE_DESCRIPTOR::AF::True
                 + PAGE_DESCRIPTOR::TYPE::Page
                 + PAGE_DESCRIPTOR::VALID::True,
@@ -201,45 +200,62 @@ pub type Granule4KiB = TranslationGranule<{ 4 * 1024 }>;
 
 const NUM_TABLES: usize = 4096 / size_of::<PageDescriptor>();
 
+/// A fixed-size translation table.
+/// The table use 4 level translation and have fewer tables because linear address space < 0x7FFF_FFFF.
+/// PGD: 1 entry PUD: 2 entries PMD: 2 * 512 entries PT: 2 * 512 * 512 entries
 #[repr(C)]
 #[repr(align(4096))]
-
 pub struct FixedSizeTranslationTable {
-    pgd: [TableDescriptor; NUM_TABLES],
+    // 1GB
     pud: [TableDescriptor; NUM_TABLES],
-    // because the mapped memory is 2MB, we use block descriptor
-    pmd: [[BlockDescriptor; NUM_TABLES]; 2],
+    // 2MB (we need at least 2 of then to cover 1 GB RAM and 1 GB MMIO)
+    pmd: [[TableDescriptor; NUM_TABLES]; 2],
+    // 4KB
+    pt: [[[PageDescriptor; NUM_TABLES]; NUM_TABLES]; 2],
+    // should be align to 4 KB, so put it at the end (512 GB)
+    pgd: TableDescriptor,
 }
 
 impl FixedSizeTranslationTable {
     pub const fn new() -> Self {
         Self {
-            pgd: [TableDescriptor::new(); NUM_TABLES],
+            pgd: TableDescriptor::new(),
             pud: [TableDescriptor::new(); NUM_TABLES],
-            pmd: [[BlockDescriptor::new(); NUM_TABLES]; 2],
+            pmd: [[TableDescriptor::new(); NUM_TABLES]; 2],
+            pt: [[[PageDescriptor::new(); NUM_TABLES]; NUM_TABLES]; 2],
         }
     }
 
     pub fn populate_table_entries(&mut self) {
-        self.pgd = array::from_fn(|i| {
-            TableDescriptor::from_next_level_table_addr(
-                self.pud.phys_start_addr_usize() + i * 0x1000,
-            )
-        });
+        self.pgd = TableDescriptor::from_next_level_table_addr(self.pud.phys_start_addr_usize());
         self.pud = array::from_fn(|i| {
+            // we only need 2 pud entries
+            // so just ignore the rest invalid entries
             TableDescriptor::from_next_level_table_addr(
                 self.pmd.phys_start_addr_usize() + i * 0x1000,
             )
         });
         self.pmd = array::from_fn(|i| {
             array::from_fn(|j| {
-                BlockDescriptor::from_output_addr(i << Granule1GiB::SHIFT | j << Granule2MiB::SHIFT)
+                TableDescriptor::from_next_level_table_addr(
+                    self.pt.phys_start_addr_usize() + i * NUM_TABLES * 0x1000 + j * 0x1000,
+                )
             })
         });
+        // stack size is not enough to use array::from_fn
+        for i in 0..2 {
+            for (j, pmd) in self.pmd[i].iter().enumerate() {
+                for (k, pt) in self.pt[i][j].iter_mut().enumerate() {
+                    *pt = PageDescriptor::from_output_addr(
+                        i << Granule1GiB::SHIFT | j << Granule2MiB::SHIFT | k << Granule4KiB::SHIFT,
+                    );
+                }
+            }
+        }
     }
 
     pub fn phys_base_address(&self) -> u64 {
-        self.pgd.phys_start_addr_u64()
+        &self.pgd as *const _ as u64
     }
 }
 
