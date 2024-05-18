@@ -1,13 +1,12 @@
-use core::arch::asm;
 use core::time::Duration;
 
 use aarch64_cpu::registers::*;
 use alloc::string::String;
-use alloc::vec::Vec;
 use alloc::{boxed::Box, format};
 use cpio::CPIOArchive;
 use library::{console, print, println, sync::mutex::Mutex};
 
+use crate::memory::phys_to_virt;
 use crate::scheduler::current;
 use crate::{
     driver::{self, mailbox},
@@ -129,15 +128,18 @@ impl Shell {
     }
 
     fn ls(&self) {
-        let mut devicetree =
-            unsafe { devicetree::FlattenedDevicetree::from_memory(memory::DEVICETREE_START_ADDR) };
+        let mut devicetree = unsafe {
+            devicetree::FlattenedDevicetree::from_memory(phys_to_virt(
+                memory::DEVICETREE_START_ADDR,
+            ))
+        };
         devicetree
             .traverse(&|device_name, property_name, property_value| {
                 if property_name == "linux,initrd-start" {
                     let mut cpio_archive = unsafe {
-                        CPIOArchive::from_memory(u32::from_be_bytes(
+                        CPIOArchive::from_memory(phys_to_virt(u32::from_be_bytes(
                             property_value.try_into().unwrap(),
-                        ) as usize)
+                        ) as usize))
                     };
                     while let Some(file) = cpio_archive.read_next() {
                         println!("{}", file.name);
@@ -156,15 +158,18 @@ impl Shell {
 
         let t = format!("{}\0", args[0]);
         let filename = t.as_str();
-        let mut devicetree =
-            unsafe { devicetree::FlattenedDevicetree::from_memory(memory::DEVICETREE_START_ADDR) };
+        let mut devicetree = unsafe {
+            devicetree::FlattenedDevicetree::from_memory(phys_to_virt(
+                memory::DEVICETREE_START_ADDR,
+            ))
+        };
         devicetree
             .traverse(&move |device_name, property_name, property_value| {
                 if property_name == "linux,initrd-start" {
                     let mut cpio_archive = unsafe {
-                        CPIOArchive::from_memory(u32::from_be_bytes(
+                        CPIOArchive::from_memory(phys_to_virt(u32::from_be_bytes(
                             property_value.try_into().unwrap(),
-                        ) as usize)
+                        ) as usize))
                     };
                     while let Some(file) = cpio_archive.read_next() {
                         if file.name == filename {
@@ -190,25 +195,26 @@ impl Shell {
 
         let t = format!("{}\0", args[0]);
         let filename = t.as_str();
-        let mut devicetree =
-            unsafe { devicetree::FlattenedDevicetree::from_memory(memory::DEVICETREE_START_ADDR) };
+        let mut devicetree = unsafe {
+            devicetree::FlattenedDevicetree::from_memory(phys_to_virt(
+                memory::DEVICETREE_START_ADDR,
+            ))
+        };
         devicetree
             .traverse(&move |device_name, property_name, property_value| {
                 if property_name == "linux,initrd-start" {
                     let mut cpio_archive = unsafe {
-                        CPIOArchive::from_memory(u32::from_be_bytes(
+                        CPIOArchive::from_memory(phys_to_virt(u32::from_be_bytes(
                             property_value.try_into().unwrap(),
-                        ) as usize)
+                        ) as usize))
                     };
 
                     while let Some(file) = cpio_archive.read_next() {
                         if file.name != filename {
                             continue;
                         }
-                        let mut code = Vec::from(file.content).into_boxed_slice();
-                        let code_start = code.as_ptr();
-                        Box::into_raw(code);
-                        unsafe { &mut *current() }.run_user_program(code_start as *const fn() -> !);
+
+                        unsafe { &mut *current() }.run_user_program(file.content);
                         return Ok(());
                     }
                     println!("run-program: {}: No such file or directory", filename);

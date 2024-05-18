@@ -272,7 +272,7 @@ impl<'a> fmt::Display for BuddyPageAllocator<'a> {
             self.boundary.lock().unwrap().0,
             self.boundary.lock().unwrap().1
         )?;
-        writeln!(f, "===============");
+        writeln!(f, "===============")?;
         for (i, list) in self
             .frame_free_list
             .lock()
@@ -306,7 +306,7 @@ impl<'a> fmt::Display for BuddyPageAllocator<'a> {
                     )?;
                 }
             }
-            writeln!(f, "===============");
+            writeln!(f, "===============")?;
         }
         Ok(())
     }

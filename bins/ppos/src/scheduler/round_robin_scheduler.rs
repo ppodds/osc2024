@@ -1,10 +1,10 @@
-use aarch64_cpu::registers::{Writeable, SPSR_EL1, TPIDR_EL1};
+use aarch64_cpu::registers::Writeable;
 use alloc::{
     boxed::Box,
     collections::{LinkedList, VecDeque},
     rc::Rc,
 };
-use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt, run_user_code};
+use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::sync::mutex::Mutex;
 
 use crate::{
@@ -62,7 +62,7 @@ impl RoundRobinScheduler {
         loop {
             // protect the scheduler from being interrupted
             unsafe { disable_kernel_space_interrupt() };
-            if let Some(mut next_task) = self.run_queue.lock().unwrap().pop_front() {
+            if let Some(next_task) = self.run_queue.lock().unwrap().pop_front() {
                 let next_task_state = next_task.lock().unwrap().state();
                 let next = &mut *next_task.lock().unwrap() as *mut Task;
                 self.run_queue.lock().unwrap().push_back(next_task);
@@ -124,29 +124,6 @@ impl Scheduler for RoundRobinScheduler {
         self._schedule();
         *self.initialized.lock().unwrap() = true;
         self.idle();
-    }
-
-    fn execute_task(&self, mut task: Task) {
-        const USER_STACK_SIZE: usize = 4096;
-        let stack_end = Box::into_raw(Box::new([0_u8; USER_STACK_SIZE])) as u64;
-        let code_start = task.thread.context.pc;
-        {
-            task.thread.spsr_el1 = (SPSR_EL1::D::Masked
-                + SPSR_EL1::I::Unmasked
-                + SPSR_EL1::A::Masked
-                + SPSR_EL1::F::Masked
-                + SPSR_EL1::M::EL0t)
-                .into();
-            task.thread.elr_el1 = code_start;
-            task.thread.sp_el0 = stack_end;
-        }
-        let t = Rc::new(Mutex::new(task));
-        let task_ptr = &*t.lock().unwrap() as *const Task;
-        unsafe { disable_kernel_space_interrupt() };
-        TPIDR_EL1.set(task_ptr as u64);
-        self.run_queue.lock().unwrap().push_front(t);
-        unsafe { enable_kernel_space_interrupt() };
-        unsafe { run_user_code(stack_end, code_start) };
     }
 
     fn initialized(&self) -> bool {

@@ -1,8 +1,11 @@
-use core::{array, mem::size_of};
+use core::{arch::asm, array, fmt, mem::size_of};
 
-use aarch64_cpu::registers::*;
+use aarch64_cpu::{asm::barrier, registers::*};
+use alloc::boxed::Box;
 use bsp::memory::PERIPHERAL_MMIO_BASE;
 use tock_registers::{interfaces::ReadWriteable, register_bitfields, registers::InMemoryRegister};
+
+use crate::memory::{phys_to_virt, virt_to_phys, PAGE_SIZE};
 
 register_bitfields! [
     u64,
@@ -106,7 +109,7 @@ register_bitfields! [
 /// A table descriptor.
 ///
 /// The output points to the next table.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub struct TableDescriptor {
     value: u64,
@@ -120,7 +123,7 @@ impl TableDescriptor {
     pub fn from_next_level_table_addr(addr: usize) -> Self {
         let val = InMemoryRegister::<u64, TABLE_DESCRIPTOR::Register>::new(0);
         val.write(
-            TABLE_DESCRIPTOR::NEXT_LEVEL_TABLE_ADDR.val(addr as u64 >> 12)
+            TABLE_DESCRIPTOR::NEXT_LEVEL_TABLE_ADDR.val(addr as u64 >> Granule4KiB::SHIFT)
                 + TABLE_DESCRIPTOR::TYPE::Table
                 + TABLE_DESCRIPTOR::VALID::True,
         );
@@ -130,12 +133,57 @@ impl TableDescriptor {
     pub fn from_2mb_block_addr(addr: usize) -> Self {
         let val = InMemoryRegister::<u64, BLOCK_DESCRIPTOR_2MB::Register>::new(0);
         val.write(
-            BLOCK_DESCRIPTOR_2MB::BLOCK_ADDR.val(addr as u64 >> 21)
+            BLOCK_DESCRIPTOR_2MB::BLOCK_ADDR.val(addr as u64 >> Granule2MiB::SHIFT)
                 + BLOCK_DESCRIPTOR_2MB::AF::True
                 + BLOCK_DESCRIPTOR_2MB::TYPE::Block
                 + BLOCK_DESCRIPTOR_2MB::VALID::True,
         );
         Self { value: val.get() }
+    }
+
+    #[inline(always)]
+    pub fn is_valid(&self) -> bool {
+        InMemoryRegister::<u64, TABLE_DESCRIPTOR::Register>::new(self.value)
+            .read(TABLE_DESCRIPTOR::VALID)
+            != 0
+    }
+
+    #[inline(always)]
+    pub fn next_level_addr(&self) -> u64 {
+        InMemoryRegister::<u64, TABLE_DESCRIPTOR::Register>::new(self.value)
+            .read(TABLE_DESCRIPTOR::NEXT_LEVEL_TABLE_ADDR)
+            << Granule4KiB::SHIFT
+    }
+}
+
+impl fmt::Display for TableDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let reg = InMemoryRegister::<u64, TABLE_DESCRIPTOR::Register>::new(self.value);
+        writeln!(f, "TableDescriptor {{")?;
+        writeln!(
+            f,
+            "  NEXT_LEVEL_TABLE_ADDR: {:#x}",
+            reg.read(TABLE_DESCRIPTOR::NEXT_LEVEL_TABLE_ADDR) << Granule4KiB::SHIFT
+        )?;
+        writeln!(
+            f,
+            "  TYPE: {}",
+            match reg.read_as_enum(TABLE_DESCRIPTOR::TYPE) {
+                Some(TABLE_DESCRIPTOR::TYPE::Value::Table) => "Table",
+                Some(TABLE_DESCRIPTOR::TYPE::Value::Block) => "Block",
+                _ => "Unknown",
+            }
+        )?;
+        writeln!(
+            f,
+            "  VALID: {}",
+            match reg.read_as_enum(TABLE_DESCRIPTOR::VALID) {
+                Some(TABLE_DESCRIPTOR::VALID::Value::True) => "True",
+                Some(TABLE_DESCRIPTOR::VALID::Value::False) => "False",
+                _ => "Unknown",
+            }
+        )?;
+        write!(f, "}}")
     }
 }
 
@@ -144,10 +192,17 @@ pub enum MemoryAttribute {
     Normal,
 }
 
+pub enum MemoryAccessPermission {
+    ReadWriteEL1,
+    ReadWriteEL1EL0,
+    ReadOnlyEL1,
+    ReadOnlyEL1EL0,
+}
+
 /// A page descriptor.
 ///
 /// The output points to physical memory.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub struct PageDescriptor {
     value: u64,
@@ -169,13 +224,125 @@ impl PageDescriptor {
         Self { value: val.get() }
     }
 
-    pub fn set_memory_attr(&mut self, attr: MemoryAttribute) {
+    pub fn set_attribute(&mut self, attr: MemoryAttribute) {
         let val = InMemoryRegister::<u64, PAGE_DESCRIPTOR::Register>::new(self.value);
         match attr {
             MemoryAttribute::Device => val.modify(PAGE_DESCRIPTOR::AttrIndx.val(0)),
             MemoryAttribute::Normal => val.modify(PAGE_DESCRIPTOR::AttrIndx.val(1)),
         }
         self.value = val.get();
+    }
+
+    #[inline(always)]
+    pub fn is_valid(&self) -> bool {
+        InMemoryRegister::<u64, PAGE_DESCRIPTOR::Register>::new(self.value)
+            .read(PAGE_DESCRIPTOR::VALID)
+            != 0
+    }
+
+    pub fn set_access_permission(&mut self, access_permission: MemoryAccessPermission) {
+        let val = InMemoryRegister::<u64, PAGE_DESCRIPTOR::Register>::new(self.value);
+        match access_permission {
+            MemoryAccessPermission::ReadWriteEL1 => val.modify(PAGE_DESCRIPTOR::AP::RW_EL1),
+            MemoryAccessPermission::ReadWriteEL1EL0 => val.modify(PAGE_DESCRIPTOR::AP::RW_EL1_EL0),
+            MemoryAccessPermission::ReadOnlyEL1 => val.modify(PAGE_DESCRIPTOR::AP::RO_EL1),
+            MemoryAccessPermission::ReadOnlyEL1EL0 => val.modify(PAGE_DESCRIPTOR::AP::RO_EL1_EL0),
+        }
+        self.value = val.get();
+    }
+
+    #[inline(always)]
+    pub fn output_addr(&self) -> u64 {
+        InMemoryRegister::<u64, PAGE_DESCRIPTOR::Register>::new(self.value)
+            .read(PAGE_DESCRIPTOR::OUTPUT_ADDR)
+            << Granule4KiB::SHIFT
+    }
+}
+
+impl fmt::Display for PageDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let reg = InMemoryRegister::<u64, PAGE_DESCRIPTOR::Register>::new(self.value);
+        writeln!(f, "PageDescriptor {{")?;
+        writeln!(
+            f,
+            "  UXN: {}",
+            match reg.read_as_enum(PAGE_DESCRIPTOR::UXN) {
+                Some(PAGE_DESCRIPTOR::UXN::Value::True) => "True",
+                Some(PAGE_DESCRIPTOR::UXN::Value::False) => "False",
+                _ => "Unknown",
+            }
+        )?;
+        writeln!(
+            f,
+            "  PXN: {}",
+            match reg.read_as_enum(PAGE_DESCRIPTOR::PXN) {
+                Some(PAGE_DESCRIPTOR::PXN::Value::True) => "True",
+                Some(PAGE_DESCRIPTOR::PXN::Value::False) => "False",
+                _ => "Unknown",
+            }
+        )?;
+        writeln!(
+            f,
+            "  OUTPUT_ADDR: {:#x}",
+            reg.read(PAGE_DESCRIPTOR::OUTPUT_ADDR) << Granule4KiB::SHIFT
+        )?;
+        writeln!(
+            f,
+            "  AF: {}",
+            match reg.read_as_enum(PAGE_DESCRIPTOR::AF) {
+                Some(PAGE_DESCRIPTOR::AF::Value::True) => "True",
+                Some(PAGE_DESCRIPTOR::AF::Value::False) => "False",
+                _ => "Unknown",
+            }
+        )?;
+        writeln!(
+            f,
+            "  SH: {}",
+            match reg.read_as_enum(PAGE_DESCRIPTOR::SH) {
+                Some(PAGE_DESCRIPTOR::SH::Value::OuterShareable) => "OuterShareable",
+                Some(PAGE_DESCRIPTOR::SH::Value::InnerShareable) => "InnerShareable",
+                _ => "Unknown",
+            }
+        )?;
+        writeln!(
+            f,
+            "  AP: {}",
+            match reg.read_as_enum(PAGE_DESCRIPTOR::AP) {
+                Some(PAGE_DESCRIPTOR::AP::Value::RW_EL1) => "RW_EL1",
+                Some(PAGE_DESCRIPTOR::AP::Value::RW_EL1_EL0) => "RW_EL1_EL0",
+                Some(PAGE_DESCRIPTOR::AP::Value::RO_EL1) => "RO_EL1",
+                Some(PAGE_DESCRIPTOR::AP::Value::RO_EL1_EL0) => "RO_EL1_EL0",
+                _ => "Unknown",
+            }
+        )?;
+        writeln!(
+            f,
+            "  AttrIndx: {}",
+            match reg.read(PAGE_DESCRIPTOR::AttrIndx) {
+                0 => "Device",
+                1 => "Normal",
+                _ => "Unknown",
+            }
+        )?;
+        writeln!(
+            f,
+            "  TYPE: {}",
+            match reg.read_as_enum(PAGE_DESCRIPTOR::TYPE) {
+                Some(PAGE_DESCRIPTOR::TYPE::Value::Page) => "Page",
+                Some(PAGE_DESCRIPTOR::TYPE::Value::Reserved_Invalid) => "Reserved_Invalid",
+                _ => "Unknown",
+            }
+        )?;
+        writeln!(
+            f,
+            "  VALID: {}",
+            match reg.read_as_enum(PAGE_DESCRIPTOR::VALID) {
+                Some(PAGE_DESCRIPTOR::VALID::Value::True) => "True",
+                Some(PAGE_DESCRIPTOR::VALID::Value::False) => "False",
+                _ => "Unknown",
+            }
+        )?;
+        write!(f, "}}")
     }
 }
 
@@ -213,7 +380,9 @@ pub type Granule1GiB = TranslationGranule<{ 1 * 1024 * 1024 * 1024 }>;
 pub type Granule2MiB = TranslationGranule<{ 2 * 1024 * 1024 }>;
 pub type Granule4KiB = TranslationGranule<{ 4 * 1024 }>;
 
-const NUM_TABLES: usize = 4096 / size_of::<PageDescriptor>();
+pub type PageGlobalDirectory = [TableDescriptor; NUM_ENTRIES];
+
+const NUM_ENTRIES: usize = 4096 / size_of::<PageDescriptor>();
 
 /// A fixed-size translation table.
 /// The table use 4 level translation and have fewer tables because linear address space < 0x7FFF_FFFF.
@@ -222,11 +391,11 @@ const NUM_TABLES: usize = 4096 / size_of::<PageDescriptor>();
 #[repr(align(4096))]
 pub struct FixedSizeTranslationTable {
     // 1GB
-    pud: [TableDescriptor; NUM_TABLES],
+    pud: [TableDescriptor; NUM_ENTRIES],
     // 2MB (we need at least 2 of then to cover 1 GB RAM and 1 GB MMIO)
-    pmd: [[TableDescriptor; NUM_TABLES]; 2],
+    pmd: [[TableDescriptor; NUM_ENTRIES]; 2],
     // 4KB
-    pt: [[[PageDescriptor; NUM_TABLES]; NUM_TABLES]; 2],
+    pt: [[[PageDescriptor; NUM_ENTRIES]; NUM_ENTRIES]; 2],
     // should be align to 4 KB, so put it at the end (512 GB)
     pgd: TableDescriptor,
 }
@@ -235,9 +404,9 @@ impl FixedSizeTranslationTable {
     pub const fn new() -> Self {
         Self {
             pgd: TableDescriptor::new(),
-            pud: [TableDescriptor::new(); NUM_TABLES],
-            pmd: [[TableDescriptor::new(); NUM_TABLES]; 2],
-            pt: [[[PageDescriptor::new(); NUM_TABLES]; NUM_TABLES]; 2],
+            pud: [TableDescriptor::new(); NUM_ENTRIES],
+            pmd: [[TableDescriptor::new(); NUM_ENTRIES]; 2],
+            pt: [[[PageDescriptor::new(); NUM_ENTRIES]; NUM_ENTRIES]; 2],
         }
     }
 
@@ -265,9 +434,9 @@ impl FixedSizeTranslationTable {
                         i << Granule1GiB::SHIFT | j << Granule2MiB::SHIFT | k << Granule4KiB::SHIFT;
                     let mut t = PageDescriptor::from_output_addr(virt_addr);
                     if virt_addr >= PERIPHERAL_MMIO_BASE {
-                        t.set_memory_attr(MemoryAttribute::Device);
+                        t.set_attribute(MemoryAttribute::Device);
                     } else {
-                        t.set_memory_attr(MemoryAttribute::Normal);
+                        t.set_attribute(MemoryAttribute::Normal);
                     }
                     *pte = t;
                 }
@@ -281,3 +450,141 @@ impl FixedSizeTranslationTable {
 }
 
 pub type KernelTranslationTable = FixedSizeTranslationTable;
+
+#[repr(align(4096))]
+#[derive(Debug, Clone)]
+pub struct PageTable {
+    pgd: PageGlobalDirectory,
+}
+
+impl PageTable {
+    const MAX_LEVEL: usize = 4;
+
+    pub const fn new() -> Self {
+        Self {
+            pgd: [TableDescriptor::new(); NUM_ENTRIES],
+        }
+    }
+
+    #[inline(always)]
+    pub fn phys_base_address(&self) -> u64 {
+        &self.pgd as *const _ as u64
+    }
+
+    fn map_page(&mut self, virt_addr: usize, pte: PageDescriptor) {
+        let mut table = &mut self.pgd;
+        for level in 0..Self::MAX_LEVEL {
+            let shift = 9 * (Self::MAX_LEVEL - 1 - level) + 12;
+            let index = (virt_addr >> shift) & 0b1_1111_1111;
+            let entry = table[index];
+            if level == Self::MAX_LEVEL - 1 {
+                // pt
+                let pt = unsafe {
+                    &mut *(table as *mut [TableDescriptor; NUM_ENTRIES]
+                        as *mut [PageDescriptor; NUM_ENTRIES])
+                };
+                pt[index] = pte;
+            } else {
+                // pgd, pud, pmd
+                if entry.is_valid() {
+                    table = unsafe {
+                        &mut *(phys_to_virt(entry.next_level_addr() as usize)
+                            as *mut [TableDescriptor; NUM_ENTRIES])
+                    };
+                } else {
+                    // create next level table first
+                    let next_level_table =
+                        Box::into_raw(Box::new([TableDescriptor::new(); NUM_ENTRIES]));
+                    table[index] = TableDescriptor::from_next_level_table_addr(virt_to_phys(
+                        next_level_table as usize,
+                    ));
+                    table = unsafe {
+                        &mut *(next_level_table as usize as *mut [TableDescriptor; NUM_ENTRIES])
+                    };
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn flush_tlb() {
+        barrier::dsb(barrier::ISH);
+        unsafe { asm!("tlbi vmalle1is") };
+        barrier::dsb(barrier::ISH);
+        barrier::isb(barrier::SY);
+    }
+
+    pub fn map_pages(
+        &mut self,
+        virt_addr: usize,
+        phys_addr: usize,
+        size: usize,
+    ) -> Result<(), &'static str> {
+        if virt_addr % PAGE_SIZE != 0 || phys_addr % PAGE_SIZE != 0 || size % PAGE_SIZE != 0 {
+            return Err("Address or size is not page aligned");
+        }
+
+        for offset in (0..size).step_by(PAGE_SIZE) {
+            let mut pte = PageDescriptor::from_output_addr(phys_addr + offset);
+            pte.set_attribute(MemoryAttribute::Normal);
+            pte.set_access_permission(MemoryAccessPermission::ReadWriteEL1EL0);
+            self.map_page(virt_addr + offset, pte);
+        }
+
+        Self::flush_tlb();
+        Ok(())
+    }
+
+    pub fn unmap_pages(&mut self, virt_addr: usize, size: usize) -> Result<(), &'static str> {
+        if virt_addr % PAGE_SIZE != 0 || size % PAGE_SIZE != 0 {
+            return Err("Address or size is not page aligned");
+        }
+
+        for offset in (0..size).step_by(PAGE_SIZE) {
+            self.map_page(virt_addr + offset, PageDescriptor::new());
+        }
+
+        Self::flush_tlb();
+        Ok(())
+    }
+
+    /// Translate physical address to virtual address by the page table.
+    pub fn virt_to_phys(&self, virt_addr: usize) -> Result<usize, &'static str> {
+        let mut table = &self.pgd;
+        for level in 0..Self::MAX_LEVEL - 1 {
+            let shift = 9 * (Self::MAX_LEVEL - 1 - level) + 12;
+            let index = (virt_addr >> shift) & 0b1_1111_1111;
+            // pgd, pud, pmd
+            let entry = table[index];
+            if entry.is_valid() {
+                table = unsafe {
+                    &mut *(phys_to_virt(entry.next_level_addr() as usize)
+                        as *mut [TableDescriptor; NUM_ENTRIES])
+                };
+            } else {
+                return Err("Page not mapped");
+            }
+        }
+        // pt
+        let pt = unsafe {
+            &*(table as *const [TableDescriptor; NUM_ENTRIES]
+                as *const [PageDescriptor; NUM_ENTRIES])
+        };
+        let index = (virt_addr >> Granule4KiB::SHIFT) & 0b1_1111_1111;
+        let entry = pt[index];
+        if entry.is_valid() {
+            return Ok(entry.output_addr() as usize | (virt_addr & 0xfff));
+        } else {
+            return Err("Page not mapped");
+        }
+    }
+
+    /// Translate physical address to virtual address by the provided page table.
+    pub fn virt_to_phys_by_table(
+        table: *const PageTable,
+        virt_addr: usize,
+    ) -> Result<usize, &'static str> {
+        let table = unsafe { &*table };
+        table.virt_to_phys(virt_addr)
+    }
+}
