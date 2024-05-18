@@ -1,12 +1,9 @@
 use core::arch::asm;
 use core::arch::global_asm;
-use core::hint;
 use core::mem::size_of;
 
-use aarch64_cpu::asm::barrier;
 use aarch64_cpu::registers::Readable;
 use aarch64_cpu::registers::Writeable;
-use aarch64_cpu::registers::SCTLR_EL1::C;
 use aarch64_cpu::registers::SP_EL0;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
@@ -15,9 +12,6 @@ use cpu::cpu::enable_kernel_space_interrupt;
 use cpu::cpu::run_user_code;
 use cpu::thread::CPUContext;
 use cpu::thread::Thread;
-use library::console::console;
-use library::console::ConsoleMode;
-use library::println;
 use library::sync::mutex::Mutex;
 
 use crate::pid::pid_manager;
