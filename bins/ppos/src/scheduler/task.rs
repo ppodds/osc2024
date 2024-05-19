@@ -86,7 +86,7 @@ pub struct Task {
     /// user space page table
     page_table: Rc<Mutex<PageTable>>,
     /// user code
-    user_code: Option<Box<[u8]>>,
+    user_code: Option<Rc<Box<[u8]>>>,
 }
 
 impl Task {
@@ -196,6 +196,7 @@ impl Task {
         }
         task.signal_handlers = self.signal_handlers.clone();
         let code = self.user_code.as_ref().unwrap();
+        task.user_code = Some(code.clone());
         task.page_table
             .lock()
             .unwrap()
@@ -263,7 +264,7 @@ impl Task {
         code_vec.resize(block_len, 0);
         let code = code_vec.into_boxed_slice();
         let code_start = code.as_ptr();
-        self.user_code = Some(code);
+        self.user_code = Some(Rc::new(code));
         self.page_table
             .lock()
             .unwrap()
