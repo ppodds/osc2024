@@ -35,7 +35,7 @@ unsafe fn software_thread_switch(prev: *mut Task, next: *mut Task) {
     SP_EL0.set(next.thread.sp_el0);
     SPSR_EL1.set(next.thread.spsr_el1);
 
-    let baddr = next.page_table_phys_base_address();
+    let baddr = next.memory_mapping().page_table_phys_base_address();
     barrier::dsb(barrier::ISH);
     TTBR0_EL1.set_baddr(baddr);
     asm!("tlbi vmalle1is");

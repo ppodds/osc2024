@@ -187,11 +187,13 @@ impl fmt::Display for TableDescriptor {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum MemoryAttribute {
     Device,
     Normal,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum MemoryAccessPermission {
     ReadWriteEL1,
     ReadWriteEL1EL0,
@@ -519,6 +521,8 @@ impl PageTable {
         virt_addr: usize,
         phys_addr: usize,
         size: usize,
+        memory_attribute: MemoryAttribute,
+        access_permission: MemoryAccessPermission,
     ) -> Result<(), &'static str> {
         if virt_addr % PAGE_SIZE != 0 || phys_addr % PAGE_SIZE != 0 || size % PAGE_SIZE != 0 {
             return Err("Address or size is not page aligned");
@@ -526,8 +530,8 @@ impl PageTable {
 
         for offset in (0..size).step_by(PAGE_SIZE) {
             let mut pte = PageDescriptor::from_output_addr(phys_addr + offset);
-            pte.set_attribute(MemoryAttribute::Normal);
-            pte.set_access_permission(MemoryAccessPermission::ReadWriteEL1EL0);
+            pte.set_attribute(memory_attribute);
+            pte.set_access_permission(access_permission);
             self.map_page(virt_addr + offset, pte);
         }
 

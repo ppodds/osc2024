@@ -8,6 +8,8 @@ use aarch64_cpu::registers::SP_EL0;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
+use bsp::memory::GPU_MEMORY_MMIO_BASE;
+use bsp::memory::GPU_MEMORY_MMIO_SIZE;
 use cpu::cpu::disable_kernel_space_interrupt;
 use cpu::cpu::enable_kernel_space_interrupt;
 use cpu::cpu::run_user_code;
@@ -15,7 +17,10 @@ use cpu::thread::CPUContext;
 use cpu::thread::Thread;
 use library::sync::mutex::Mutex;
 
-use crate::memory::paging::page::PageTable;
+use crate::memory::paging::memory_mapping::MemoryMapping;
+use crate::memory::paging::page::MemoryAccessPermission;
+use crate::memory::paging::page::MemoryAttribute;
+use crate::memory::phys_to_virt;
 use crate::memory::round_down;
 use crate::memory::round_up;
 use crate::memory::virt_to_phys;
@@ -84,7 +89,7 @@ pub struct Task {
     /// The context that was saved when the task do a user defined signal handler.
     signal_saved_context: Option<(u64, CPUContext)>,
     /// user space page table
-    page_table: Rc<Mutex<PageTable>>,
+    memory_mapping: MemoryMapping,
     /// user code
     user_code: Option<Rc<Box<[u8]>>>,
 }
@@ -108,7 +113,7 @@ impl Task {
             pending_signals: 0,
             doing_signal: false,
             signal_saved_context: None,
-            page_table: Rc::new(Mutex::new(PageTable::new())),
+            memory_mapping: MemoryMapping::new(),
             user_code: None,
         }
     }
@@ -156,13 +161,13 @@ impl Task {
             task.user_stack = StackInfo::new(user_stack as *mut u8, user_stack_bottom as *mut u8);
             task.thread.sp_el0 = SP_EL0.get();
             // workaround for user space page table
-            task.page_table
-                .lock()
-                .unwrap()
+            task.memory_mapping
                 .map_pages(
                     Self::USER_STACK_START,
                     virt_to_phys(user_stack as usize),
                     Self::USER_STACK_SIZE,
+                    MemoryAttribute::Normal,
+                    MemoryAccessPermission::ReadWriteEL1EL0,
                 )
                 .unwrap();
         };
@@ -197,10 +202,23 @@ impl Task {
         task.signal_handlers = self.signal_handlers.clone();
         let code = self.user_code.as_ref().unwrap();
         task.user_code = Some(code.clone());
-        task.page_table
-            .lock()
-            .unwrap()
-            .map_pages(0, virt_to_phys(code.as_ptr() as usize), code.len())
+        task.memory_mapping
+            .map_pages(
+                0,
+                virt_to_phys(code.as_ptr() as usize),
+                code.len(),
+                MemoryAttribute::Normal,
+                MemoryAccessPermission::ReadOnlyEL1EL0,
+            )
+            .unwrap();
+        task.memory_mapping
+            .map_pages(
+                GPU_MEMORY_MMIO_BASE,
+                phys_to_virt(GPU_MEMORY_MMIO_BASE),
+                GPU_MEMORY_MMIO_SIZE,
+                MemoryAttribute::Device,
+                MemoryAccessPermission::ReadWriteEL1EL0,
+            )
             .unwrap();
         let task = Rc::new(Mutex::new(task));
         let task_ptr = &mut *task.lock().unwrap() as *mut Task;
@@ -265,20 +283,33 @@ impl Task {
         let code = code_vec.into_boxed_slice();
         let code_start = code.as_ptr();
         self.user_code = Some(Rc::new(code));
-        self.page_table
-            .lock()
-            .unwrap()
-            .map_pages(0, virt_to_phys(code_start as usize), block_len)
+        self.memory_mapping
+            .map_pages(
+                0,
+                virt_to_phys(code_start as usize),
+                block_len,
+                MemoryAttribute::Normal,
+                MemoryAccessPermission::ReadOnlyEL1EL0,
+            )
+            .unwrap();
+        self.memory_mapping
+            .map_pages(
+                GPU_MEMORY_MMIO_BASE,
+                phys_to_virt(GPU_MEMORY_MMIO_BASE),
+                GPU_MEMORY_MMIO_SIZE,
+                MemoryAttribute::Device,
+                MemoryAccessPermission::ReadWriteEL1EL0,
+            )
             .unwrap();
         let stack_top = Box::into_raw(Box::new([0_u8; Self::USER_STACK_SIZE])) as usize;
         let stack_bottom = stack_top + Self::USER_STACK_SIZE;
-        self.page_table
-            .lock()
-            .unwrap()
+        self.memory_mapping
             .map_pages(
                 Self::USER_STACK_START,
                 virt_to_phys(stack_top),
                 Self::USER_STACK_SIZE,
+                MemoryAttribute::Normal,
+                MemoryAccessPermission::ReadWriteEL1EL0,
             )
             .unwrap();
         self.user_stack.top = stack_top as *mut u8;
@@ -331,23 +362,23 @@ impl Task {
                             // clear the pending signal
                             self.pending_signals &= !(1 << i);
                             // map the signal handler stack to the user space
-                            self.page_table
-                                .lock()
-                                .unwrap()
+                            self.memory_mapping
                                 .map_pages(
                                     Self::USER_STACK_START,
                                     virt_to_phys(signal_stack as usize),
                                     Self::USER_STACK_SIZE,
+                                    MemoryAttribute::Normal,
+                                    MemoryAccessPermission::ReadWriteEL1EL0,
                                 )
                                 .unwrap();
                             // ensure the signal handler wrapper is accessible in the user space
-                            self.page_table
-                                .lock()
-                                .unwrap()
+                            self.memory_mapping
                                 .map_pages(
                                     Self::SIGNAL_HANDLER_WRAPPER_SHARE_START,
                                     round_down(virt_to_phys(signal_handler_wrapper as usize)),
                                     PAGE_SIZE,
+                                    MemoryAttribute::Normal,
+                                    MemoryAccessPermission::ReadOnlyEL1EL0,
                                 )
                                 .unwrap();
                             enable_kernel_space_interrupt();
@@ -390,19 +421,17 @@ impl Task {
         };
         self.signal_stack = StackInfo::new(core::ptr::null_mut(), core::ptr::null_mut());
         // map the user stack back
-        self.page_table
-            .lock()
-            .unwrap()
+        self.memory_mapping
             .map_pages(
                 Self::USER_STACK_START,
                 virt_to_phys(self.user_stack.top as usize),
                 Self::USER_STACK_SIZE,
+                MemoryAttribute::Normal,
+                MemoryAccessPermission::ReadWriteEL1EL0,
             )
             .unwrap();
         // invalidate the signal handler wrapper share page
-        self.page_table
-            .lock()
-            .unwrap()
+        self.memory_mapping
             .unmap_pages(Self::SIGNAL_HANDLER_WRAPPER_SHARE_START, PAGE_SIZE)
             .unwrap();
         // restore the context
@@ -412,8 +441,8 @@ impl Task {
     }
 
     #[inline(always)]
-    pub fn page_table_phys_base_address(&self) -> u64 {
-        self.page_table.lock().unwrap().phys_base_address()
+    pub fn memory_mapping(&self) -> MemoryMapping {
+        self.memory_mapping.clone()
     }
 }
 
