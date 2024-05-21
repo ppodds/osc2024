@@ -7,6 +7,8 @@ use tock_registers::{interfaces::ReadWriteable, register_bitfields, registers::I
 
 use crate::memory::{phys_to_virt, virt_to_phys, PAGE_SIZE};
 
+use super::memory_mapping::MemoryExecutePermission;
+
 register_bitfields! [
     u64,
     TABLE_DESCRIPTOR [
@@ -242,6 +244,7 @@ impl PageDescriptor {
             != 0
     }
 
+    #[inline(always)]
     pub fn set_access_permission(&mut self, access_permission: MemoryAccessPermission) {
         let val = InMemoryRegister::<u64, PAGE_DESCRIPTOR::Register>::new(self.value);
         match access_permission {
@@ -249,6 +252,26 @@ impl PageDescriptor {
             MemoryAccessPermission::ReadWriteEL1EL0 => val.modify(PAGE_DESCRIPTOR::AP::RW_EL1_EL0),
             MemoryAccessPermission::ReadOnlyEL1 => val.modify(PAGE_DESCRIPTOR::AP::RO_EL1),
             MemoryAccessPermission::ReadOnlyEL1EL0 => val.modify(PAGE_DESCRIPTOR::AP::RO_EL1_EL0),
+        }
+        self.value = val.get();
+    }
+
+    #[inline(always)]
+    pub fn set_execute_permission(&mut self, execute_permission: MemoryExecutePermission) {
+        let val = InMemoryRegister::<u64, PAGE_DESCRIPTOR::Register>::new(self.value);
+        match execute_permission {
+            MemoryExecutePermission::AllowKernelAndUser => {
+                val.modify(PAGE_DESCRIPTOR::UXN::False + PAGE_DESCRIPTOR::PXN::False)
+            }
+            MemoryExecutePermission::AllowUser => {
+                val.modify(PAGE_DESCRIPTOR::UXN::False + PAGE_DESCRIPTOR::PXN::True)
+            }
+            MemoryExecutePermission::AllowKernel => {
+                val.modify(PAGE_DESCRIPTOR::UXN::True + PAGE_DESCRIPTOR::PXN::False)
+            }
+            MemoryExecutePermission::Deny => {
+                val.modify(PAGE_DESCRIPTOR::UXN::True + PAGE_DESCRIPTOR::PXN::True)
+            }
         }
         self.value = val.get();
     }
@@ -523,6 +546,7 @@ impl PageTable {
         size: usize,
         memory_attribute: MemoryAttribute,
         access_permission: MemoryAccessPermission,
+        execute_permission: MemoryExecutePermission,
     ) -> Result<(), &'static str> {
         if virt_addr % PAGE_SIZE != 0 || phys_addr % PAGE_SIZE != 0 || size % PAGE_SIZE != 0 {
             return Err("Address or size is not page aligned");
@@ -532,6 +556,7 @@ impl PageTable {
             let mut pte = PageDescriptor::from_output_addr(phys_addr + offset);
             pte.set_attribute(memory_attribute);
             pte.set_access_permission(access_permission);
+            pte.set_execute_permission(execute_permission);
             self.map_page(virt_addr + offset, pte);
         }
 
@@ -584,11 +609,13 @@ impl PageTable {
     }
 
     /// Translate physical address to virtual address by the provided page table.
-    pub fn virt_to_phys_by_table(
+    /// # Safety
+    /// - The provided page table must be valid.
+    /// - Ensure the page table is not modified during the translation.
+    pub unsafe fn virt_to_phys_by_table(
         table: *const PageTable,
         virt_addr: usize,
     ) -> Result<usize, &'static str> {
-        let table = unsafe { &*table };
-        table.virt_to_phys(virt_addr)
+        (&*table).virt_to_phys(virt_addr)
     }
 }

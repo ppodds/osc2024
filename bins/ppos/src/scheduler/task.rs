@@ -17,6 +17,7 @@ use cpu::thread::CPUContext;
 use cpu::thread::Thread;
 use library::sync::mutex::Mutex;
 
+use crate::memory::paging::memory_mapping::MemoryExecutePermission;
 use crate::memory::paging::memory_mapping::MemoryMapping;
 use crate::memory::paging::page::MemoryAccessPermission;
 use crate::memory::paging::page::MemoryAttribute;
@@ -72,7 +73,7 @@ impl StackInfo {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Task {
     pub thread: Thread,
     state: TaskState,
@@ -89,7 +90,7 @@ pub struct Task {
     /// The context that was saved when the task do a user defined signal handler.
     signal_saved_context: Option<(u64, CPUContext)>,
     /// user space page table
-    memory_mapping: MemoryMapping,
+    memory_mapping: Rc<MemoryMapping>,
     /// user code
     user_code: Option<Rc<Box<[u8]>>>,
 }
@@ -113,7 +114,7 @@ impl Task {
             pending_signals: 0,
             doing_signal: false,
             signal_saved_context: None,
-            memory_mapping: MemoryMapping::new(),
+            memory_mapping: Rc::new(MemoryMapping::new()),
             user_code: None,
         }
     }
@@ -168,19 +169,19 @@ impl Task {
                     Self::USER_STACK_SIZE,
                     MemoryAttribute::Normal,
                     MemoryAccessPermission::ReadWriteEL1EL0,
+                    MemoryExecutePermission::Deny,
                 )
                 .unwrap();
         };
         // copy the current thread context
         // the registers are stored in the stack in compiler generated function prologue
         unsafe {
-            asm!("mov x0, {}
-            ldp {}, {}, [x0, -16]
+            asm!("ldp {}, {}, [x0, -16]
             ldp {}, {}, [x0, -32]
             ldp {}, {}, [x0, -48]
             ldp {}, {}, [x0, -64]
             ldp {}, {}, [x0, -80]
-            ldr {}, [x0, -88]", in(reg) caller_sp, out(reg) task.thread.context.x20, out(reg) task.thread.context.x19, out(reg) task.thread.context.x22, out(reg) task.thread.context.x21, out(reg) task.thread.context.x24, out(reg) task.thread.context.x23, out(reg) task.thread.context.x26, out(reg) task.thread.context.x25, out(reg) task.thread.context.x28, out(reg) task.thread.context.x27, out(reg) task.thread.context.fp);
+            ldr {}, [x0, -88]", out(reg) task.thread.context.x20, out(reg) task.thread.context.x19, out(reg) task.thread.context.x22, out(reg) task.thread.context.x21, out(reg) task.thread.context.x24, out(reg) task.thread.context.x23, out(reg) task.thread.context.x26, out(reg) task.thread.context.x25, out(reg) task.thread.context.x28, out(reg) task.thread.context.x27, out(reg) task.thread.context.fp, in("x0") caller_sp);
         }
         // child thread will jump to child_entry function and use ret to return to the caller
         task.thread.context.pc = child_entry as u64;
@@ -209,6 +210,7 @@ impl Task {
                 code.len(),
                 MemoryAttribute::Normal,
                 MemoryAccessPermission::ReadOnlyEL1EL0,
+                MemoryExecutePermission::AllowUser,
             )
             .unwrap();
         task.memory_mapping
@@ -218,6 +220,7 @@ impl Task {
                 GPU_MEMORY_MMIO_SIZE,
                 MemoryAttribute::Device,
                 MemoryAccessPermission::ReadWriteEL1EL0,
+                MemoryExecutePermission::Deny,
             )
             .unwrap();
         let task = Rc::new(Mutex::new(task));
@@ -290,6 +293,7 @@ impl Task {
                 block_len,
                 MemoryAttribute::Normal,
                 MemoryAccessPermission::ReadOnlyEL1EL0,
+                MemoryExecutePermission::AllowUser,
             )
             .unwrap();
         self.memory_mapping
@@ -299,6 +303,7 @@ impl Task {
                 GPU_MEMORY_MMIO_SIZE,
                 MemoryAttribute::Device,
                 MemoryAccessPermission::ReadWriteEL1EL0,
+                MemoryExecutePermission::Deny,
             )
             .unwrap();
         let stack_top = Box::into_raw(Box::new([0_u8; Self::USER_STACK_SIZE])) as usize;
@@ -310,6 +315,7 @@ impl Task {
                 Self::USER_STACK_SIZE,
                 MemoryAttribute::Normal,
                 MemoryAccessPermission::ReadWriteEL1EL0,
+                MemoryExecutePermission::Deny,
             )
             .unwrap();
         self.user_stack.top = stack_top as *mut u8;
@@ -363,12 +369,16 @@ impl Task {
                             self.pending_signals &= !(1 << i);
                             // map the signal handler stack to the user space
                             self.memory_mapping
+                                .unmap_pages(Self::USER_STACK_START, Self::USER_STACK_SIZE)
+                                .unwrap();
+                            self.memory_mapping
                                 .map_pages(
                                     Self::USER_STACK_START,
                                     virt_to_phys(signal_stack as usize),
                                     Self::USER_STACK_SIZE,
                                     MemoryAttribute::Normal,
                                     MemoryAccessPermission::ReadWriteEL1EL0,
+                                    MemoryExecutePermission::Deny,
                                 )
                                 .unwrap();
                             // ensure the signal handler wrapper is accessible in the user space
@@ -379,6 +389,7 @@ impl Task {
                                     PAGE_SIZE,
                                     MemoryAttribute::Normal,
                                     MemoryAccessPermission::ReadOnlyEL1EL0,
+                                    MemoryExecutePermission::AllowUser,
                                 )
                                 .unwrap();
                             enable_kernel_space_interrupt();
@@ -422,12 +433,16 @@ impl Task {
         self.signal_stack = StackInfo::new(core::ptr::null_mut(), core::ptr::null_mut());
         // map the user stack back
         self.memory_mapping
+            .unmap_pages(Self::USER_STACK_START, Self::USER_STACK_SIZE)
+            .unwrap();
+        self.memory_mapping
             .map_pages(
                 Self::USER_STACK_START,
                 virt_to_phys(self.user_stack.top as usize),
                 Self::USER_STACK_SIZE,
                 MemoryAttribute::Normal,
                 MemoryAccessPermission::ReadWriteEL1EL0,
+                MemoryExecutePermission::Deny,
             )
             .unwrap();
         // invalidate the signal handler wrapper share page
@@ -441,7 +456,7 @@ impl Task {
     }
 
     #[inline(always)]
-    pub fn memory_mapping(&self) -> MemoryMapping {
+    pub fn memory_mapping(&self) -> Rc<MemoryMapping> {
         self.memory_mapping.clone()
     }
 }

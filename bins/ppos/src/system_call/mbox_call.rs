@@ -5,17 +5,18 @@ use crate::{
 };
 
 pub fn mbox_call(channel: u8, mbox: *mut u32) -> i32 {
-    mailbox().call(
-        channel,
-        phys_to_virt(
-            PageTable::virt_to_phys_by_table(
-                unsafe { &*current() }
-                    .memory_mapping()
-                    .page_table_phys_base_address() as *const PageTable,
-                mbox as usize,
-            )
-            .unwrap(),
-        ) as *mut u32,
-    );
-    1
+    match unsafe {
+        PageTable::virt_to_phys_by_table(
+            (&*current())
+                .memory_mapping()
+                .page_table_phys_base_address() as *const PageTable,
+            mbox as usize,
+        )
+    } {
+        Ok(phys_addr) => {
+            mailbox().call(channel, phys_to_virt(phys_addr) as *mut u32);
+            1
+        }
+        Err(e) => 0,
+    }
 }
