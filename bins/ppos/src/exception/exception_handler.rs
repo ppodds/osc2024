@@ -6,9 +6,11 @@ use aarch64_cpu::registers::*;
 use core::fmt;
 use cpu::cpu::enable_kernel_space_interrupt;
 use device::interrupt_manager;
+use library::println;
 use tock_registers::{interfaces::Readable, registers::InMemoryRegister};
 
 use crate::{
+    memory::paging::memory_mapping::DemandPageError,
     scheduler::{current, scheduler},
     system_call::system_call,
 };
@@ -128,6 +130,44 @@ extern "C" fn lower_aarch64_synchronous(e: &mut ExceptionContext) {
                 )
             } else {
                 panic!("unknown ISS")
+            }
+        }
+        Some(ESR_EL1::EC::Value::InstrAbortLowerEL)
+        | Some(ESR_EL1::EC::Value::DataAbortLowerEL) => {
+            let current = unsafe { &mut *current() };
+            let iss = e.esr_el1.0.read(ESR_EL1::ISS) as u32;
+            let ifsc_or_dfsc = iss & 0b11_1111;
+            if 0b0 <= ifsc_or_dfsc && ifsc_or_dfsc < 0b100 {
+                println!(
+                    "[Data abort]: address size fault. addr: {:#x}",
+                    FAR_EL1.get()
+                );
+                current.exit(1);
+            }
+            // translation fault
+            else if ifsc_or_dfsc < 0b1000 {
+                // try to demand page
+                // if region not found, it means the process is trying to access invalid memory
+                match current.memory_mapping().demand_page(FAR_EL1.get() as usize) {
+                    Ok(_) => {
+                        println!("[Translation fault]: {:#x}", FAR_EL1.get());
+                    }
+                    Err(DemandPageError::RegionNotFound) => {
+                        println!("[Segmentation fault]: kill process");
+                        current.exit(1);
+                    }
+                }
+            } else if ifsc_or_dfsc < 0b1100 {
+                println!(
+                    "[Data abort]: access flag fault. addr: {:#x}",
+                    FAR_EL1.get()
+                );
+                current.exit(1);
+            } else if ifsc_or_dfsc < 0b10000 {
+                println!("[Data abort]: permission fault. addr: {:#x}", FAR_EL1.get());
+                current.exit(1);
+            } else {
+                default_exception_handler(e);
             }
         }
         Some(_) => default_exception_handler(e),

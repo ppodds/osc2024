@@ -165,7 +165,7 @@ impl Task {
             task.memory_mapping
                 .map_pages(
                     Self::USER_STACK_START,
-                    virt_to_phys(user_stack as usize),
+                    Some(virt_to_phys(user_stack as usize)),
                     Self::USER_STACK_SIZE,
                     MemoryAttribute::Normal,
                     MemoryAccessPermission::ReadWriteEL1EL0,
@@ -206,7 +206,7 @@ impl Task {
         task.memory_mapping
             .map_pages(
                 0,
-                virt_to_phys(code.as_ptr() as usize),
+                Some(virt_to_phys(code.as_ptr() as usize)),
                 code.len(),
                 MemoryAttribute::Normal,
                 MemoryAccessPermission::ReadOnlyEL1EL0,
@@ -216,7 +216,7 @@ impl Task {
         task.memory_mapping
             .map_pages(
                 GPU_MEMORY_MMIO_BASE,
-                phys_to_virt(GPU_MEMORY_MMIO_BASE),
+                Some(phys_to_virt(GPU_MEMORY_MMIO_BASE)),
                 GPU_MEMORY_MMIO_SIZE,
                 MemoryAttribute::Device,
                 MemoryAccessPermission::ReadWriteEL1EL0,
@@ -289,7 +289,7 @@ impl Task {
         self.memory_mapping
             .map_pages(
                 0,
-                virt_to_phys(code_start as usize),
+                Some(virt_to_phys(code_start as usize)),
                 block_len,
                 MemoryAttribute::Normal,
                 MemoryAccessPermission::ReadOnlyEL1EL0,
@@ -299,7 +299,7 @@ impl Task {
         self.memory_mapping
             .map_pages(
                 GPU_MEMORY_MMIO_BASE,
-                phys_to_virt(GPU_MEMORY_MMIO_BASE),
+                Some(phys_to_virt(GPU_MEMORY_MMIO_BASE)),
                 GPU_MEMORY_MMIO_SIZE,
                 MemoryAttribute::Device,
                 MemoryAccessPermission::ReadWriteEL1EL0,
@@ -311,7 +311,7 @@ impl Task {
         self.memory_mapping
             .map_pages(
                 Self::USER_STACK_START,
-                virt_to_phys(stack_top),
+                Some(virt_to_phys(stack_top)),
                 Self::USER_STACK_SIZE,
                 MemoryAttribute::Normal,
                 MemoryAccessPermission::ReadWriteEL1EL0,
@@ -374,7 +374,7 @@ impl Task {
                             self.memory_mapping
                                 .map_pages(
                                     Self::USER_STACK_START,
-                                    virt_to_phys(signal_stack as usize),
+                                    Some(virt_to_phys(signal_stack as usize)),
                                     Self::USER_STACK_SIZE,
                                     MemoryAttribute::Normal,
                                     MemoryAccessPermission::ReadWriteEL1EL0,
@@ -385,7 +385,7 @@ impl Task {
                             self.memory_mapping
                                 .map_pages(
                                     Self::SIGNAL_HANDLER_WRAPPER_SHARE_START,
-                                    round_down(virt_to_phys(signal_handler_wrapper as usize)),
+                                    Some(round_down(virt_to_phys(signal_handler_wrapper as usize))),
                                     PAGE_SIZE,
                                     MemoryAttribute::Normal,
                                     MemoryAccessPermission::ReadOnlyEL1EL0,
@@ -438,7 +438,7 @@ impl Task {
         self.memory_mapping
             .map_pages(
                 Self::USER_STACK_START,
-                virt_to_phys(self.user_stack.top as usize),
+                Some(virt_to_phys(self.user_stack.top as usize)),
                 Self::USER_STACK_SIZE,
                 MemoryAttribute::Normal,
                 MemoryAccessPermission::ReadWriteEL1EL0,

@@ -44,14 +44,11 @@ pub fn mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: u32, file_offset
             }
         };
     if flags_reg.is_set(FLAGS::MAP_ANONYMOUS) {
-        let mut v: Vec<u8> = Vec::with_capacity(len);
-        v.resize(len, 0);
-        let allocated_region = Box::into_raw(v.into_boxed_slice());
         if current
             .memory_mapping()
             .map_pages(
                 allocated_addr,
-                virt_to_phys(allocated_addr as *mut u8 as usize),
+                None,
                 len,
                 MemoryAttribute::Normal,
                 if prot_reg.is_set(PROTECTION::PROT_WRITE) {

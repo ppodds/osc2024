@@ -2,6 +2,8 @@ use alloc::{boxed::Box, vec::Vec};
 use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::sync::mutex::Mutex;
 
+use crate::memory::virt_to_phys;
+
 use super::page::{MemoryAccessPermission, MemoryAttribute, PageTable};
 
 #[derive(Debug, Clone, Copy)]
@@ -55,25 +57,64 @@ pub enum MemoryExecutePermission {
 #[derive(Debug, Clone)]
 pub struct MemoryMappingInfo {
     virt_addr: usize,
-    phys_addr: usize,
-    protection: MemoryProtection,
+    phys_addr: Option<usize>,
+    memory_attribute: MemoryAttribute,
+    access_permission: MemoryAccessPermission,
+    execute_permission: MemoryExecutePermission,
     size: usize,
 }
 
 impl MemoryMappingInfo {
     pub const fn new(
         virt_addr: usize,
-        phys_addr: usize,
-        protection: MemoryProtection,
+        phys_addr: Option<usize>,
+        memory_attribute: MemoryAttribute,
+        access_permission: MemoryAccessPermission,
+        execute_permission: MemoryExecutePermission,
         size: usize,
     ) -> Self {
         Self {
             virt_addr,
             phys_addr,
-            protection,
+            memory_attribute,
+            access_permission,
+            execute_permission,
             size,
         }
     }
+
+    pub const fn virt_addr(&self) -> usize {
+        self.virt_addr
+    }
+
+    pub const fn phys_addr(&self) -> Option<usize> {
+        self.phys_addr
+    }
+
+    pub fn set_phys_addr(&mut self, phys_addr: usize) {
+        self.phys_addr = Some(phys_addr);
+    }
+
+    pub const fn memory_attribute(&self) -> MemoryAttribute {
+        self.memory_attribute
+    }
+
+    pub const fn access_permission(&self) -> MemoryAccessPermission {
+        self.access_permission
+    }
+
+    pub const fn execute_permission(&self) -> MemoryExecutePermission {
+        self.execute_permission
+    }
+
+    pub const fn size(&self) -> usize {
+        self.size
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DemandPageError {
+    RegionNotFound,
 }
 
 #[derive(Debug)]
@@ -104,7 +145,7 @@ impl MemoryMapping {
     pub fn map_pages(
         &self,
         virt_addr: usize,
-        phys_addr: usize,
+        phys_addr: Option<usize>,
         size: usize,
         memory_attribute: MemoryAttribute,
         access_permission: MemoryAccessPermission,
@@ -122,8 +163,29 @@ impl MemoryMapping {
             .partition_point(|x| x.virt_addr < virt_addr);
         self.memory_mapping_info_list.lock().unwrap().insert(
             i,
-            MemoryMappingInfo::new(virt_addr, phys_addr, access_permission.into(), size),
+            MemoryMappingInfo::new(
+                virt_addr,
+                phys_addr,
+                memory_attribute,
+                access_permission,
+                execute_permission,
+                size,
+            ),
         );
+        unsafe { enable_kernel_space_interrupt() }
+        Ok(())
+    }
+
+    fn allocate_pages(
+        &self,
+        virt_addr: usize,
+        phys_addr: usize,
+        size: usize,
+        memory_attribute: MemoryAttribute,
+        access_permission: MemoryAccessPermission,
+        execute_permission: MemoryExecutePermission,
+    ) -> Result<(), &'static str> {
+        unsafe { disable_kernel_space_interrupt() }
         let r = self.page_table.lock().unwrap().map_pages(
             virt_addr,
             phys_addr,
@@ -185,14 +247,57 @@ impl MemoryMapping {
         let mut i = 0;
 
         while start_addr < 0xffff_ffff_ffff {
-            if start_addr + size > self.memory_mapping_info_list.lock().unwrap()[i].virt_addr {
-                start_addr = self.memory_mapping_info_list.lock().unwrap()[i].virt_addr
-                    + self.memory_mapping_info_list.lock().unwrap()[i].size;
+            let info = &self.memory_mapping_info_list.lock().unwrap()[i];
+            if start_addr + size > info.virt_addr {
+                start_addr = info.virt_addr + info.size;
                 i += 1;
             } else {
                 return Ok(start_addr);
             }
         }
         Err("No available virtual address")
+    }
+
+    pub fn demand_page(&self, virt_addr: usize) -> Result<(), DemandPageError> {
+        if self.memory_mapping_info_list.lock().unwrap().is_empty() {
+            return Err(DemandPageError::RegionNotFound);
+        }
+
+        let i = self
+            .memory_mapping_info_list
+            .lock()
+            .unwrap()
+            .partition_point(|x| x.virt_addr <= virt_addr);
+        if i == 0 {
+            return Err(DemandPageError::RegionNotFound);
+        }
+
+        let i = i - 1;
+        let region = &mut self.memory_mapping_info_list.lock().unwrap()[i];
+        if virt_addr >= region.virt_addr + region.size {
+            return Err(DemandPageError::RegionNotFound);
+        }
+
+        // if region.phys_addr is Some, it means that the region is already allocated.
+        let phys_addr = match region.phys_addr {
+            Some(phys_addr) => phys_addr,
+            None => {
+                let mut v: Vec<u8> = Vec::with_capacity(region.size());
+                v.resize(region.size(), 0);
+                let allocated_region = Box::into_raw(v.into_boxed_slice());
+                let phys_addr = virt_to_phys(allocated_region as *mut u8 as usize);
+                region.set_phys_addr(phys_addr);
+                phys_addr
+            }
+        };
+        self.allocate_pages(
+            region.virt_addr,
+            phys_addr,
+            region.size,
+            region.memory_attribute,
+            region.access_permission,
+            region.execute_permission,
+        );
+        Ok(())
     }
 }
