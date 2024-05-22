@@ -1,3 +1,5 @@
+use core::slice;
+
 use aarch64_cpu::registers::Writeable;
 use alloc::{
     boxed::Box,
@@ -5,16 +7,21 @@ use alloc::{
     rc::Rc,
 };
 use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
-use library::sync::mutex::Mutex;
+use library::{
+    console::{console, ConsoleMode},
+    println,
+    sync::mutex::Mutex,
+};
 
 use crate::{
     driver::timer,
-    memory::{phys_binary_load_addr, phys_dram_start_addr},
+    memory::{virtual_kernel_space_addr, virtual_kernel_start_addr, AllocatedMemory},
+    pid::pid_manager,
 };
 
 use super::{
     current, switch_to,
-    task::{StackInfo, Task, TaskState},
+    task::{Task, TaskState},
     Scheduler,
 };
 
@@ -47,6 +54,10 @@ impl RoundRobinScheduler {
                     let task = task_ref.lock().unwrap();
                     if task.state() == TaskState::Dead {
                         self.run_queue.lock().unwrap().remove(i);
+                        pid_manager().remove_pid(task.pid().lock().unwrap().number());
+                        console().change_mode(ConsoleMode::Sync);
+                        println!("Task {} is recycled", task.pid().lock().unwrap().number());
+                        console().change_mode(ConsoleMode::Async);
                     }
                 }
                 unsafe { enable_kernel_space_interrupt() };
@@ -98,10 +109,16 @@ impl Scheduler for RoundRobinScheduler {
     }
 
     fn start_scheduler(&self) -> ! {
-        let idle_task = Rc::new(Mutex::new(Task::new(StackInfo::new(
-            phys_dram_start_addr() as *mut u8,
-            phys_binary_load_addr() as *mut u8,
-        ))));
+        let idle_task = Rc::new(Mutex::new(Task::new(
+            // the idle task will never be recycled so it's safe
+            AllocatedMemory::new(unsafe {
+                Box::from_raw(slice::from_raw_parts_mut(
+                    virtual_kernel_space_addr() as *mut u8,
+                    virtual_kernel_start_addr() - virtual_kernel_space_addr(),
+                ) as *mut [u8])
+            }),
+            None,
+        )));
         idle_task
             .lock()
             .unwrap()

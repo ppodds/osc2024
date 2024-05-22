@@ -14,6 +14,7 @@ use crate::{
 };
 
 pub static mut SLAB_ALLOCATOR_DEBUG_ENABLE: bool = false;
+pub static mut BUDDY_ALLOCATOR_DEBUG_ENABLE: bool = false;
 
 pub struct Shell {
     input: String,
@@ -65,6 +66,7 @@ impl Shell {
         println!("switch-2s-alert\t: enable/disable 2s alert");
         println!("set-timeout\t: print a message after period of time");
         println!("switch-slab-debug-mode\t: switch slab allocator debug mode");
+        println!("switch-buddy-debug-mode\t: switch buddy allocator debug mode");
     }
 
     fn reboot(&self) {
@@ -105,6 +107,7 @@ impl Shell {
                 "switch-2s-alert" => self.switch_2s_alert(),
                 "set-timeout" => self.set_timeout(args),
                 "switch-slab-debug-mode" => self.switch_slab_debug_mode(),
+                "switch-buddy-debug-mode" => self.switch_buddy_debug_mode(),
                 "" => (),
                 cmd => println!("{}: command not found", cmd),
             }
@@ -281,6 +284,10 @@ impl Shell {
 
     fn switch_slab_debug_mode(&self) {
         unsafe { SLAB_ALLOCATOR_DEBUG_ENABLE = !SLAB_ALLOCATOR_DEBUG_ENABLE };
+    }
+
+    fn switch_buddy_debug_mode(&self) {
+        unsafe { BUDDY_ALLOCATOR_DEBUG_ENABLE = !BUDDY_ALLOCATOR_DEBUG_ENABLE };
     }
 }
 

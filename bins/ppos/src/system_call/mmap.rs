@@ -61,6 +61,7 @@ pub fn mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: u32, file_offset
                 } else {
                     MemoryExecutePermission::Deny
                 },
+                None,
             )
             .is_err()
         {

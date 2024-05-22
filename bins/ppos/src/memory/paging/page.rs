@@ -3,6 +3,10 @@ use core::{arch::asm, array, fmt, mem::size_of};
 use aarch64_cpu::{asm::barrier, registers::*};
 use alloc::boxed::Box;
 use bsp::memory::PERIPHERAL_MMIO_BASE;
+use library::{
+    console::{console, ConsoleMode},
+    println,
+};
 use tock_registers::{interfaces::ReadWriteable, register_bitfields, registers::InMemoryRegister};
 
 use crate::memory::{phys_to_virt, virt_to_phys, PAGE_SIZE};
@@ -520,6 +524,13 @@ impl PageTable {
                     // create next level table first
                     let next_level_table =
                         Box::into_raw(Box::new([TableDescriptor::new(); NUM_ENTRIES]));
+                    console().change_mode(ConsoleMode::Sync);
+                    println!(
+                        "Allocate a level {} table at {:#x}",
+                        level + 1,
+                        next_level_table as usize
+                    );
+                    console().change_mode(ConsoleMode::Async);
                     table[index] = TableDescriptor::from_next_level_table_addr(virt_to_phys(
                         next_level_table as usize,
                     ));

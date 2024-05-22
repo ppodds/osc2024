@@ -1,8 +1,8 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, vec, vec::Vec};
 use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::sync::mutex::Mutex;
 
-use crate::memory::virt_to_phys;
+use crate::memory::{virt_to_phys, AllocatedMemory};
 
 use super::page::{MemoryAccessPermission, MemoryAttribute, PageTable};
 
@@ -62,6 +62,7 @@ pub struct MemoryMappingInfo {
     access_permission: MemoryAccessPermission,
     execute_permission: MemoryExecutePermission,
     size: usize,
+    physical_memory: Option<Rc<AllocatedMemory>>,
 }
 
 impl MemoryMappingInfo {
@@ -72,6 +73,7 @@ impl MemoryMappingInfo {
         access_permission: MemoryAccessPermission,
         execute_permission: MemoryExecutePermission,
         size: usize,
+        physical_memory: Option<Rc<AllocatedMemory>>,
     ) -> Self {
         Self {
             virt_addr,
@@ -80,6 +82,7 @@ impl MemoryMappingInfo {
             access_permission,
             execute_permission,
             size,
+            physical_memory,
         }
     }
 
@@ -89,10 +92,6 @@ impl MemoryMappingInfo {
 
     pub const fn phys_addr(&self) -> Option<usize> {
         self.phys_addr
-    }
-
-    pub fn set_phys_addr(&mut self, phys_addr: usize) {
-        self.phys_addr = Some(phys_addr);
     }
 
     pub const fn memory_attribute(&self) -> MemoryAttribute {
@@ -110,11 +109,22 @@ impl MemoryMappingInfo {
     pub const fn size(&self) -> usize {
         self.size
     }
+
+    pub fn physical_memory(&self) -> Option<Rc<AllocatedMemory>> {
+        self.physical_memory.clone()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum DemandPageError {
     RegionNotFound,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CopyOnWriteError {
+    RegionNotFound,
+    RegionIsReadOnly,
+    Other(&'static str),
 }
 
 #[derive(Debug)]
@@ -150,7 +160,12 @@ impl MemoryMapping {
         memory_attribute: MemoryAttribute,
         access_permission: MemoryAccessPermission,
         execute_permission: MemoryExecutePermission,
+        physical_memory: Option<Rc<AllocatedMemory>>,
     ) -> Result<(), &'static str> {
+        if phys_addr.is_none() && physical_memory.is_some() {
+            return Err("phys_addr is required when physical_memory is provided");
+        }
+
         unsafe { disable_kernel_space_interrupt() }
         if self.is_overlaps(virt_addr, size) {
             unsafe { enable_kernel_space_interrupt() }
@@ -170,6 +185,7 @@ impl MemoryMapping {
                 access_permission,
                 execute_permission,
                 size,
+                physical_memory,
             ),
         );
         unsafe { enable_kernel_space_interrupt() }
@@ -259,6 +275,7 @@ impl MemoryMapping {
     }
 
     pub fn demand_page(&self, virt_addr: usize) -> Result<(), DemandPageError> {
+        unsafe { disable_kernel_space_interrupt() }
         if self.memory_mapping_info_list.lock().unwrap().is_empty() {
             return Err(DemandPageError::RegionNotFound);
         }
@@ -282,11 +299,12 @@ impl MemoryMapping {
         let phys_addr = match region.phys_addr {
             Some(phys_addr) => phys_addr,
             None => {
-                let mut v: Vec<u8> = Vec::with_capacity(region.size());
-                v.resize(region.size(), 0);
-                let allocated_region = Box::into_raw(v.into_boxed_slice());
-                let phys_addr = virt_to_phys(allocated_region as *mut u8 as usize);
-                region.set_phys_addr(phys_addr);
+                let allocated_region = Rc::new(AllocatedMemory::new(
+                    vec![0_u8; region.size()].into_boxed_slice(),
+                ));
+                let phys_addr = virt_to_phys(allocated_region.as_ptr() as usize);
+                region.phys_addr = Some(phys_addr);
+                region.physical_memory = Some(allocated_region);
                 phys_addr
             }
         };
@@ -298,6 +316,112 @@ impl MemoryMapping {
             region.access_permission,
             region.execute_permission,
         );
+        unsafe { enable_kernel_space_interrupt() }
         Ok(())
+    }
+
+    /// Copy the memory mapping.
+    /// The function returns a new MemoryMapping instance with the same memory mapping info.
+    /// It use Copy on Write (COW) mechanism for the physical memory.
+    pub fn copy(&self) -> Result<Self, &'static str> {
+        unsafe { disable_kernel_space_interrupt() }
+        let mut new_memory_mapping = Self::new();
+        for info in self.memory_mapping_info_list.lock().unwrap().iter() {
+            new_memory_mapping
+                .memory_mapping_info_list
+                .lock()
+                .unwrap()
+                .push(MemoryMappingInfo::new(
+                    info.virt_addr,
+                    info.phys_addr,
+                    info.memory_attribute,
+                    info.access_permission,
+                    info.execute_permission,
+                    info.size,
+                    info.physical_memory.clone(),
+                ));
+
+            if info.physical_memory.is_some() {
+                // copy on write
+                // set page as read only
+                // when permission fault occurs, the page is copied and set as read write if the page is read write originally
+                self.page_table.lock().unwrap().map_pages(
+                    info.virt_addr,
+                    info.phys_addr.unwrap(),
+                    info.size,
+                    info.memory_attribute,
+                    MemoryAccessPermission::ReadOnlyEL1EL0,
+                    info.execute_permission,
+                )?;
+                new_memory_mapping.page_table.lock().unwrap().map_pages(
+                    info.virt_addr,
+                    info.phys_addr.unwrap(),
+                    info.size,
+                    info.memory_attribute,
+                    MemoryAccessPermission::ReadOnlyEL1EL0,
+                    info.execute_permission,
+                )?;
+            }
+        }
+        unsafe { enable_kernel_space_interrupt() }
+        Ok(new_memory_mapping)
+    }
+
+    pub fn get_region(&self, virt_addr: usize) -> Option<MemoryMappingInfo> {
+        match self
+            .memory_mapping_info_list
+            .lock()
+            .unwrap()
+            .binary_search_by(|x| x.virt_addr.cmp(&virt_addr))
+        {
+            Ok(i) => Some(self.memory_mapping_info_list.lock().unwrap()[i].clone()),
+            Err(_) => None,
+        }
+    }
+
+    pub fn copy_on_write(&self, virt_addr: usize) -> Result<(), CopyOnWriteError> {
+        unsafe { disable_kernel_space_interrupt() }
+        if self.memory_mapping_info_list.lock().unwrap().is_empty() {
+            return Err(CopyOnWriteError::RegionNotFound);
+        }
+
+        let i = self
+            .memory_mapping_info_list
+            .lock()
+            .unwrap()
+            .partition_point(|x| x.virt_addr <= virt_addr);
+        if i == 0 {
+            return Err(CopyOnWriteError::RegionNotFound);
+        }
+
+        let i = i - 1;
+        let region = &mut self.memory_mapping_info_list.lock().unwrap()[i];
+        if virt_addr >= region.virt_addr + region.size {
+            return Err(CopyOnWriteError::RegionNotFound);
+        }
+
+        let r = match region.access_permission() {
+            MemoryAccessPermission::ReadWriteEL1EL0 => {
+                let phys_mem = region.physical_memory().unwrap();
+                let mut new_mem = vec![0_u8; phys_mem.len()].into_boxed_slice();
+                let phys_addr = virt_to_phys(new_mem.as_ptr() as usize);
+                new_mem.copy_from_slice(&*phys_mem);
+                region.phys_addr = Some(phys_addr);
+                region.physical_memory = Some(Rc::new(AllocatedMemory::new(new_mem)));
+                self.allocate_pages(
+                    region.virt_addr,
+                    phys_addr,
+                    region.size,
+                    region.memory_attribute,
+                    MemoryAccessPermission::ReadWriteEL1EL0,
+                    region.execute_permission,
+                )
+                .map_err(|e| CopyOnWriteError::Other(e))
+            }
+            MemoryAccessPermission::ReadOnlyEL1EL0 => Err(CopyOnWriteError::RegionIsReadOnly),
+            _ => unreachable!(),
+        };
+        unsafe { enable_kernel_space_interrupt() }
+        r
     }
 }

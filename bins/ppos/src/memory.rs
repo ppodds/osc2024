@@ -14,6 +14,7 @@
 *    }
 */
 
+use alloc::{boxed::Box, rc::Rc};
 use library::println;
 
 use self::{buddy_page_allocator::BuddyPageAllocator, slab_allocator::SlabAllocator};
@@ -31,6 +32,37 @@ pub static mut DEVICETREE_START_ADDR: usize = 0;
 pub static mut CPIO_START_ADDR: usize = 0;
 pub static mut CPIO_END_ADDR: usize = 0;
 pub const PAGE_SIZE: usize = 4096;
+
+#[derive(Debug)]
+pub struct AllocatedMemory {
+    inner: Box<[u8]>,
+}
+
+impl AllocatedMemory {
+    #[inline(always)]
+    pub const fn new(memory: Box<[u8]>) -> Self {
+        Self { inner: memory }
+    }
+
+    #[inline(always)]
+    pub fn top(&self) -> *const u8 {
+        self.inner.as_ptr()
+    }
+
+    #[inline(always)]
+    pub fn bottom(&self) -> *const u8 {
+        (self.inner.as_ptr() as usize + self.inner.len()) as *const u8
+    }
+}
+
+impl core::ops::Deref for AllocatedMemory {
+    type Target = Box<[u8]>;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
 
 #[inline(always)]
 pub const fn round_up_with(v: usize, s: usize) -> usize {
