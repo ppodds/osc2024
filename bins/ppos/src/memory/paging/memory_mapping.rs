@@ -133,14 +133,14 @@ pub struct MemoryMapping {
     /// list of memory mapping info
     memory_mapping_info_list: Mutex<Vec<MemoryMappingInfo>>,
     /// user space page table
-    page_table: Box<Mutex<PageTable>>,
+    page_table: Mutex<PageTable>,
 }
 
 impl MemoryMapping {
     pub fn new() -> Self {
         Self {
             memory_mapping_info_list: Mutex::new(Vec::new()),
-            page_table: Box::new(Mutex::new(PageTable::new())),
+            page_table: Mutex::new(PageTable::new()),
         }
     }
 

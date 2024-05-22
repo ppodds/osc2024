@@ -109,7 +109,6 @@ impl Task {
     }
 
     pub fn from_job(job: fn() -> !) -> Self {
-        // call into_raw to prevent the Box from being dropped
         let stack = AllocatedMemory::new(vec![0_u8; Self::KERNEL_STACK_SIZE].into_boxed_slice());
         let stack_bottom = stack.bottom();
         let mut task = Self::new(stack, None);
