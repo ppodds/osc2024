@@ -9,7 +9,7 @@ pub fn mbox_call(channel: u8, mbox: *mut u32) -> i32 {
         PageTable::virt_to_phys_by_table(
             (&*current())
                 .memory_mapping()
-                .page_table_phys_base_address() as *const PageTable,
+                .page_table_phys_base_address() as usize,
             mbox as usize,
         )
     } {

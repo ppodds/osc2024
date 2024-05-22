@@ -1,7 +1,7 @@
 use core::{arch::asm, array, fmt, mem::size_of};
 
 use aarch64_cpu::{asm::barrier, registers::*};
-use alloc::boxed::Box;
+use alloc::{collections::LinkedList, vec};
 use bsp::memory::PERIPHERAL_MMIO_BASE;
 use library::{
     console::{console, ConsoleMode},
@@ -9,7 +9,7 @@ use library::{
 };
 use tock_registers::{interfaces::ReadWriteable, register_bitfields, registers::InMemoryRegister};
 
-use crate::memory::{phys_to_virt, virt_to_phys, PAGE_SIZE};
+use crate::memory::{phys_to_virt, virt_to_phys, AllocatedMemory, PAGE_SIZE};
 
 use super::memory_mapping::MemoryExecutePermission;
 
@@ -480,28 +480,35 @@ impl FixedSizeTranslationTable {
 
 pub type KernelTranslationTable = FixedSizeTranslationTable;
 
-#[repr(align(4096))]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PageTable {
-    pgd: PageGlobalDirectory,
+    pgd: *mut PageGlobalDirectory,
+    allocated_pages: LinkedList<AllocatedMemory>,
 }
 
 impl PageTable {
     const MAX_LEVEL: usize = 4;
 
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
+        let pgd_mem = AllocatedMemory::new(
+            vec![0_u8; size_of::<TableDescriptor>() * NUM_ENTRIES].into_boxed_slice(),
+        );
+        let pgd = pgd_mem.as_ptr() as *mut PageGlobalDirectory;
+        let mut allocated_pages = LinkedList::new();
+        allocated_pages.push_back(pgd_mem);
         Self {
-            pgd: [TableDescriptor::new(); NUM_ENTRIES],
+            pgd,
+            allocated_pages,
         }
     }
 
     #[inline(always)]
     pub fn phys_base_address(&self) -> u64 {
-        &self.pgd as *const _ as u64
+        virt_to_phys(self.pgd as usize) as u64
     }
 
     fn map_page(&mut self, virt_addr: usize, pte: PageDescriptor) {
-        let mut table = &mut self.pgd;
+        let mut table = unsafe { &mut *self.pgd };
         for level in 0..Self::MAX_LEVEL {
             let shift = 9 * (Self::MAX_LEVEL - 1 - level) + 12;
             let index = (virt_addr >> shift) & 0b1_1111_1111;
@@ -522,21 +529,22 @@ impl PageTable {
                     };
                 } else {
                     // create next level table first
-                    let next_level_table =
-                        Box::into_raw(Box::new([TableDescriptor::new(); NUM_ENTRIES]));
+                    let next_level_table_mem = AllocatedMemory::new(
+                        vec![0_u8; size_of::<TableDescriptor>() * NUM_ENTRIES].into_boxed_slice(),
+                    );
+                    let next_level_table = next_level_table_mem.as_ptr() as usize;
+                    self.allocated_pages.push_back(next_level_table_mem);
                     console().change_mode(ConsoleMode::Sync);
                     println!(
                         "Allocate a level {} table at {:#x}",
                         level + 1,
-                        next_level_table as usize
+                        next_level_table
                     );
                     console().change_mode(ConsoleMode::Async);
-                    table[index] = TableDescriptor::from_next_level_table_addr(virt_to_phys(
-                        next_level_table as usize,
-                    ));
-                    table = unsafe {
-                        &mut *(next_level_table as usize as *mut [TableDescriptor; NUM_ENTRIES])
-                    };
+                    table[index] =
+                        TableDescriptor::from_next_level_table_addr(virt_to_phys(next_level_table));
+                    table =
+                        unsafe { &mut *(next_level_table as *mut [TableDescriptor; NUM_ENTRIES]) };
                 }
             }
         }
@@ -588,9 +596,15 @@ impl PageTable {
         Ok(())
     }
 
-    /// Translate physical address to virtual address by the page table.
-    pub fn virt_to_phys(&self, virt_addr: usize) -> Result<usize, &'static str> {
-        let mut table = &self.pgd;
+    /// Translate physical address to virtual address by the provided page table physical address.
+    /// # Safety
+    /// - The provided page table must be valid.
+    /// - Ensure the page table is not modified during the translation.
+    pub unsafe fn virt_to_phys_by_table(
+        table_phys_addr: usize,
+        virt_addr: usize,
+    ) -> Result<usize, &'static str> {
+        let mut table = unsafe { &*(phys_to_virt(table_phys_addr) as *const PageGlobalDirectory) };
         for level in 0..Self::MAX_LEVEL - 1 {
             let shift = 9 * (Self::MAX_LEVEL - 1 - level) + 12;
             let index = (virt_addr >> shift) & 0b1_1111_1111;
@@ -605,6 +619,7 @@ impl PageTable {
                 return Err("Page not mapped");
             }
         }
+
         // pt
         let pt = unsafe {
             &*(table as *const [TableDescriptor; NUM_ENTRIES]
@@ -617,16 +632,5 @@ impl PageTable {
         } else {
             return Err("Page not mapped");
         }
-    }
-
-    /// Translate physical address to virtual address by the provided page table.
-    /// # Safety
-    /// - The provided page table must be valid.
-    /// - Ensure the page table is not modified during the translation.
-    pub unsafe fn virt_to_phys_by_table(
-        table: *const PageTable,
-        virt_addr: usize,
-    ) -> Result<usize, &'static str> {
-        (&*table).virt_to_phys(virt_addr)
     }
 }

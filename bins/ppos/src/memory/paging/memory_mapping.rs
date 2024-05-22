@@ -236,7 +236,12 @@ impl MemoryMapping {
 
     /// Translate physical address to virtual address by the page table.
     pub fn virt_to_phys(&self, virt_addr: usize) -> Result<usize, &'static str> {
-        self.page_table.lock().unwrap().virt_to_phys(virt_addr)
+        unsafe {
+            PageTable::virt_to_phys_by_table(
+                self.page_table.lock().unwrap().phys_base_address() as usize,
+                virt_addr,
+            )
+        }
     }
 
     pub fn is_overlaps(&self, virt_addr: usize, size: usize) -> bool {
