@@ -6,8 +6,6 @@ use super::page::KernelTranslationTable;
 pub struct MemoryManagementUnit {}
 
 impl MemoryManagementUnit {
-    pub const FIXED_SIZE_TRANSLATION_TABLE_ADDR: u64 = 0x1000;
-
     #[inline(always)]
     pub unsafe fn enable_mmu(&self) {
         self.setup_mair();

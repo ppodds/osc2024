@@ -118,6 +118,7 @@ impl MemoryMappingInfo {
 #[derive(Debug, Clone, Copy)]
 pub enum DemandPageError {
     RegionNotFound,
+    Other(&'static str),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -315,7 +316,8 @@ impl MemoryMapping {
             region.memory_attribute,
             region.access_permission,
             region.execute_permission,
-        );
+        )
+        .map_err(|e| DemandPageError::Other(e))?;
         unsafe { enable_kernel_space_interrupt() }
         Ok(())
     }
@@ -325,7 +327,7 @@ impl MemoryMapping {
     /// It use Copy on Write (COW) mechanism for the physical memory.
     pub fn copy(&self) -> Result<Self, &'static str> {
         unsafe { disable_kernel_space_interrupt() }
-        let mut new_memory_mapping = Self::new();
+        let new_memory_mapping = Self::new();
         for info in self.memory_mapping_info_list.lock().unwrap().iter() {
             new_memory_mapping
                 .memory_mapping_info_list

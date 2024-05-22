@@ -139,7 +139,7 @@ extern "C" fn lower_aarch64_synchronous(e: &mut ExceptionContext) {
             let iss = e.esr_el1.0.read(ESR_EL1::ISS) as u32;
             let ifsc_or_dfsc = iss & 0b11_1111;
             let virt_addr = FAR_EL1.get() as usize;
-            if 0b0 <= ifsc_or_dfsc && ifsc_or_dfsc < 0b100 {
+            if ifsc_or_dfsc < 0b100 {
                 println!("[Data abort]: address size fault. addr: {:#x}", virt_addr);
                 current.exit(1);
             }
@@ -154,6 +154,9 @@ extern "C" fn lower_aarch64_synchronous(e: &mut ExceptionContext) {
                     Err(DemandPageError::RegionNotFound) => {
                         println!("[Segmentation fault]: kill process (cause by translation fault). addr: {:#x}", virt_addr);
                         current.exit(1);
+                    }
+                    Err(DemandPageError::Other(e)) => {
+                        panic!("Demand page error: {:?}", e);
                     }
                 }
             } else if ifsc_or_dfsc < 0b1100 {

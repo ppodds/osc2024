@@ -69,7 +69,7 @@ impl<'a> BuddyPageAllocator<'a> {
             unsafe {
                 if (*node).frame_index() == buddy_index {
                     list_ins.remove(node as *mut OrderFreeListNode);
-                    if unsafe { BUDDY_ALLOCATOR_DEBUG_ENABLE } {
+                    if BUDDY_ALLOCATOR_DEBUG_ENABLE {
                         println!("Remove buddy from free list. buddy index: {}", buddy_index);
                         println!(
                             "Merge frame {} into frame {}. New val: {}",

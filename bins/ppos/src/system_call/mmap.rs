@@ -1,5 +1,4 @@
 use aarch64_cpu::registers::Readable;
-use alloc::{boxed::Box, vec::Vec};
 use tock_registers::{register_bitfields, registers::*};
 
 use crate::{
@@ -8,7 +7,7 @@ use crate::{
             memory_mapping::MemoryExecutePermission,
             page::{MemoryAccessPermission, MemoryAttribute},
         },
-        round_up, virt_to_phys, PAGE_SIZE,
+        round_up, PAGE_SIZE,
     },
     scheduler::current,
 };

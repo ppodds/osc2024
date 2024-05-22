@@ -14,7 +14,7 @@
 *    }
 */
 
-use alloc::{boxed::Box, rc::Rc};
+use alloc::boxed::Box;
 use library::println;
 
 use self::{buddy_page_allocator::BuddyPageAllocator, slab_allocator::SlabAllocator};
@@ -34,6 +34,7 @@ pub static mut CPIO_END_ADDR: usize = 0;
 pub const PAGE_SIZE: usize = 4096;
 
 #[derive(Debug)]
+#[repr(C)]
 pub struct AllocatedMemory {
     inner: Box<[u8]>,
 }
