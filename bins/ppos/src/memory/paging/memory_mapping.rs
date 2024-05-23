@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, rc::Rc, vec, vec::Vec};
+use alloc::{rc::Rc, vec, vec::Vec};
 use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use library::sync::mutex::Mutex;
 
