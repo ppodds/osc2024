@@ -1,5 +1,7 @@
 use crate::exception::exception_handler::ExceptionContext;
 
+mod chdir;
+mod close;
 mod exec;
 mod exit;
 mod fork;
@@ -7,11 +9,16 @@ mod get_pid;
 mod kill;
 mod kill_with_signal;
 mod mbox_call;
+mod mkdir;
 mod mmap;
+mod mount;
+mod open;
+mod read;
 mod sig_return;
 mod signal;
 mod uart_read;
 mod uart_write;
+mod write;
 
 pub enum SystemCallNumber {
     GetPID,
@@ -25,6 +32,13 @@ pub enum SystemCallNumber {
     Signal,
     KillWithSignal,
     MMap,
+    Open,
+    Close,
+    Write,
+    Read,
+    MakeDirectory,
+    Mount,
+    ChangeDirectory,
 
     // internal use
     SignalReturn = 64,
@@ -44,6 +58,13 @@ impl From<u64> for SystemCallNumber {
             8 => SystemCallNumber::Signal,
             9 => SystemCallNumber::KillWithSignal,
             10 => SystemCallNumber::MMap,
+            11 => SystemCallNumber::Open,
+            12 => SystemCallNumber::Close,
+            13 => SystemCallNumber::Write,
+            14 => SystemCallNumber::Read,
+            15 => SystemCallNumber::MakeDirectory,
+            16 => SystemCallNumber::Mount,
+            17 => SystemCallNumber::ChangeDirectory,
             64 => SystemCallNumber::SignalReturn,
             _ => panic!("unsupport system call number"),
         }
@@ -64,7 +85,7 @@ pub fn system_call(
         SystemCallNumber::UARTRead => uart_read::uart_read(arg0 as *mut u8, arg1),
         SystemCallNumber::UARTWrite => uart_write::uart_write(arg0 as *const u8, arg1),
         SystemCallNumber::Exec => {
-            exec::exec(arg0 as *const char, arg1 as *const *const char) as usize
+            exec::exec(arg0 as *const i8, arg1 as *const *const char) as usize
         }
         SystemCallNumber::Fork => fork::fork() as usize,
         SystemCallNumber::Exit => {
@@ -95,6 +116,19 @@ pub fn system_call(
             arg4 as u32,
             arg5 as u32,
         ) as usize,
+        SystemCallNumber::Open => open::open(arg0 as *const i8, arg1 as u32) as usize,
+        SystemCallNumber::Close => close::close(arg0 as i32) as usize,
+        SystemCallNumber::Write => write::write(arg0 as i32, arg1 as *const u8, arg2) as usize,
+        SystemCallNumber::Read => read::read(arg0 as i32, arg1 as *mut u8, arg2) as usize,
+        SystemCallNumber::MakeDirectory => mkdir::mkdir(arg0 as *const i8, arg1 as u32) as usize,
+        SystemCallNumber::Mount => mount::mount(
+            arg0 as *const i8,
+            arg1 as *const i8,
+            arg2 as *const i8,
+            arg3 as u64,
+            arg4 as *const (),
+        ) as usize,
+        SystemCallNumber::ChangeDirectory => chdir::chdir(arg0 as *const i8) as usize,
         SystemCallNumber::SignalReturn => {
             sig_return::sig_return();
             0

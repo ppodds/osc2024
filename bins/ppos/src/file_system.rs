@@ -266,7 +266,7 @@ impl VirtualFileSystem {
         }
         for name in path.split("/") {
             match name {
-                "." => continue,
+                "" | "." => continue,
                 ".." => {
                     if let Some(p) = parent.parent() {
                         parent = p.upgrade().unwrap();
@@ -283,6 +283,15 @@ impl VirtualFileSystem {
             }
         }
         Ok(parent)
+    }
+
+    pub fn get_file_system(&self, name: &str) -> Option<Rc<dyn FileSystemOperation>> {
+        for fs in self.file_systems.lock().unwrap().iter() {
+            if fs.name() == name {
+                return Some(fs.clone());
+            }
+        }
+        None
     }
 }
 

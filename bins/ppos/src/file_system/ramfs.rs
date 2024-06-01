@@ -148,7 +148,7 @@ impl RamFSFile {
 }
 
 impl FileOperation for RamFSFile {
-    fn write(&self) {
+    fn write(&self, buf: &[u8], len: usize) -> Result<usize, &'static str> {
         unimplemented!()
     }
 
@@ -360,6 +360,10 @@ impl DirectoryEntryOperation for RamFSDirectoryEntry {
 
     fn super_block(&self) -> Weak<dyn SuperBlockOperation> {
         self.inner.super_block()
+    }
+
+    fn remove_child(&self, name: &str) {
+        self.inner.remove_child(name)
     }
 }
 

@@ -2,7 +2,7 @@ use alloc::{rc::Weak, string::String, vec::Vec};
 use core::{any::Any, fmt::Debug};
 use library::sync::mutex::Mutex;
 
-use super::{inode::INodeOperation, super_block::SuperBlockOperation, virtual_file_system};
+use super::{inode::INodeOperation, super_block::SuperBlockOperation};
 
 pub trait DirectoryEntryOperation: Debug + Any {
     fn parent(&self) -> Option<Weak<dyn DirectoryEntryOperation>>;
@@ -16,6 +16,8 @@ pub trait DirectoryEntryOperation: Debug + Any {
     fn inode(&self) -> Weak<dyn INodeOperation>;
 
     fn add_child(&self, child: Weak<dyn DirectoryEntryOperation>);
+
+    fn remove_child(&self, name: &str);
 
     fn children(&self) -> Vec<Weak<dyn DirectoryEntryOperation>>;
 
@@ -79,5 +81,14 @@ impl DirectoryEntryOperation for DirectoryEntry {
 
     fn super_block(&self) -> Weak<dyn SuperBlockOperation> {
         self.super_block.clone()
+    }
+
+    fn remove_child(&self, name: &str) {
+        let mut children = self.children.lock().unwrap();
+        let i = children
+            .iter()
+            .position(|x| x.upgrade().unwrap().name() == name)
+            .unwrap();
+        children.remove(i);
     }
 }

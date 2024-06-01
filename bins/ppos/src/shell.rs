@@ -238,21 +238,41 @@ impl Shell {
             println!("Usage: mkdir <directory>");
             return;
         }
-        let directory_name = args[0];
         let current = unsafe { &mut *current() };
-        current
-            .current_working_directory()
-            .dentry
-            .upgrade()
-            .unwrap()
-            .inode()
-            .upgrade()
-            .unwrap()
-            .mkdir(
-                Umode::new(UMODE::OWNER_READ::SET),
-                String::from(directory_name),
-                Some(current.current_working_directory().dentry.clone()),
-            );
+        match args[0].rsplit_once("/") {
+            Some((parent_path, directory_name)) => {
+                let parent_node = if parent_path == "" {
+                    virtual_file_system()
+                        .root()
+                        .unwrap()
+                        .root
+                        .upgrade()
+                        .unwrap()
+                } else {
+                    virtual_file_system().lookup(parent_path).unwrap()
+                };
+                parent_node.inode().upgrade().unwrap().mkdir(
+                    Umode::new(UMODE::OWNER_READ::SET),
+                    String::from(directory_name),
+                    Some(Rc::downgrade(&parent_node)),
+                );
+            }
+            None => {
+                current
+                    .current_working_directory()
+                    .dentry
+                    .upgrade()
+                    .unwrap()
+                    .inode()
+                    .upgrade()
+                    .unwrap()
+                    .mkdir(
+                        Umode::new(UMODE::OWNER_READ::SET),
+                        String::from(args[0]),
+                        Some(current.current_working_directory().dentry.clone()),
+                    );
+            }
+        }
     }
 
     fn touch(&self, args: Box<[&str]>) {
@@ -260,21 +280,32 @@ impl Shell {
             println!("Usage: touch <file>");
             return;
         }
-        let filename = args[0];
         let current = unsafe { &mut *current() };
-        current
-            .current_working_directory()
-            .dentry
-            .upgrade()
-            .unwrap()
-            .inode()
-            .upgrade()
-            .unwrap()
-            .create(
-                Umode::new(UMODE::OWNER_READ::SET),
-                String::from(filename),
-                Some(current.current_working_directory().dentry.clone()),
-            );
+        match args[0].rsplit_once("/") {
+            Some((parent_path, filename)) => {
+                let parent_node = virtual_file_system().lookup(parent_path).unwrap();
+                parent_node.inode().upgrade().unwrap().create(
+                    Umode::new(UMODE::OWNER_READ::SET),
+                    String::from(filename),
+                    Some(Rc::downgrade(&parent_node)),
+                );
+            }
+            None => {
+                current
+                    .current_working_directory()
+                    .dentry
+                    .upgrade()
+                    .unwrap()
+                    .inode()
+                    .upgrade()
+                    .unwrap()
+                    .create(
+                        Umode::new(UMODE::OWNER_READ::SET),
+                        String::from(args[0]),
+                        Some(current.current_working_directory().dentry.clone()),
+                    );
+            }
+        }
     }
 
     fn switch_2s_alert(&mut self) {

@@ -12,7 +12,7 @@ pub struct File {
 }
 
 pub trait FileOperation: Debug {
-    fn write(&self);
+    fn write(&self, buf: &[u8], len: usize) -> Result<usize, &'static str>;
 
     fn read(&self, buf: &mut [u8], len: usize) -> Result<usize, &'static str>;
 
@@ -35,7 +35,7 @@ impl File {
 }
 
 impl FileOperation for File {
-    fn write(&self) {
+    fn write(&self, buf: &[u8], len: usize) -> Result<usize, &'static str> {
         unimplemented!()
     }
 

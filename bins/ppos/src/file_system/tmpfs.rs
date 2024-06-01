@@ -4,9 +4,10 @@ use alloc::{
     boxed::Box,
     rc::{Rc, Weak},
     string::String,
+    vec,
     vec::Vec,
 };
-use library::time::Time;
+use library::{sync::mutex::Mutex, time::Time};
 use vfs::file::{Umode, UMODE};
 
 use super::{
@@ -94,15 +95,34 @@ impl TmpFSFile {
 }
 
 impl FileOperation for TmpFSFile {
-    fn write(&self) {
-        unimplemented!()
+    fn write(&self, buf: &[u8], len: usize) -> Result<usize, &'static str> {
+        let inode = Rc::downcast::<TmpFSINode>(self.inner.inode()).unwrap();
+        if inode.content.lock().unwrap().is_none() {
+            let mut content = vec![0_u8; len].into_boxed_slice();
+            for i in 0..len {
+                content[i] = buf[i];
+            }
+            *inode.content.lock().unwrap() = Some(content);
+            Ok(len)
+        } else {
+            let mut content_mutex = inode.content.lock().unwrap();
+            let content = content_mutex.as_mut().unwrap();
+            let start = self.inner.position();
+            let writable_len = content.len() - start;
+            let write_len = min(writable_len, len);
+            let end = start + write_len;
+            for i in start..end {
+                content[i] = buf[i];
+            }
+            self.inner.set_position(end);
+            Ok(write_len)
+        }
     }
 
     fn read(&self, buf: &mut [u8], len: usize) -> Result<usize, &'static str> {
-        let content = match Rc::downcast::<TmpFSINode>(self.inner.inode())
-            .unwrap()
-            .content
-        {
+        let inode = Rc::downcast::<TmpFSINode>(self.inner.inode()).unwrap();
+        let content_mutex = inode.content.lock().unwrap();
+        let content = match content_mutex.as_ref() {
             Some(c) => c,
             None => return Err("No content in the inode"),
         };
@@ -140,7 +160,7 @@ impl FileOperation for TmpFSFile {
 #[derive(Debug)]
 pub struct TmpFSINode {
     inner: INode,
-    content: Option<&'static [u8]>,
+    content: Mutex<Option<Box<[u8]>>>,
 }
 
 impl TmpFSINode {
@@ -153,11 +173,11 @@ impl TmpFSINode {
         ctime: Time,
         size: usize,
         super_block: Weak<TmpFSSuperBlock>,
-        content: Option<&'static [u8]>,
+        content: Option<Box<[u8]>>,
     ) -> Self {
         Self {
             inner: INode::new(umode, uid, gid, atime, mtime, ctime, size, super_block),
-            content,
+            content: Mutex::new(content),
         }
     }
 }
@@ -374,5 +394,9 @@ impl DirectoryEntryOperation for TmpFSDirectoryEntry {
 
     fn super_block(&self) -> Weak<dyn SuperBlockOperation> {
         self.inner.super_block()
+    }
+
+    fn remove_child(&self, name: &str) {
+        self.inner.remove_child(name)
     }
 }
