@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+mod device;
 mod driver;
 mod exception;
 mod file_system;
@@ -53,9 +54,9 @@ unsafe fn kernel_init_mmu() -> ! {
 unsafe fn kernel_init() -> ! {
     memory::init_allocator();
     exception::handling_init();
+    init_root_file_system().unwrap();
     driver::init().unwrap();
     pid_manager().init();
-    init_root_file_system().unwrap();
     scheduler::register_scheduler(&ROUND_ROBIN_SCHEDULER);
     console().change_mode(ConsoleMode::Async);
     enable_kernel_space_interrupt();

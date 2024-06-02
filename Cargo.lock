@@ -111,7 +111,6 @@ dependencies = [
  "bsp",
  "cpio",
  "cpu",
- "device",
  "devicetree",
  "hashbrown",
  "library",

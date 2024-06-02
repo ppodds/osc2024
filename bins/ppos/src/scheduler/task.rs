@@ -101,7 +101,7 @@ impl Task {
     pub fn new(stack: AllocatedMemory, memory_mapping: Option<Rc<MemoryMapping>>) -> Self {
         let root = virtual_file_system().root().unwrap();
         let root_path = Path::new(root.clone(), root.root);
-        Self {
+        let mut task = Self {
             thread: Thread::new(),
             state: TaskState::Running,
             kernel_stack: stack,
@@ -117,7 +117,11 @@ impl Task {
             },
             file_system_info: FileSystemInfo::new(root_path.clone(), root_path),
             file_descriptor_table: FixedSizeTable::new(Self::PROCESS_MAX_OPEN_FILES),
-        }
+        };
+        task.open_file("/dev/uart").unwrap();
+        task.open_file("/dev/uart").unwrap();
+        task.open_file("/dev/uart").unwrap();
+        task
     }
 
     pub fn from_job(job: fn() -> !) -> Self {
@@ -157,6 +161,8 @@ impl Task {
             kernel_stack,
             Some(Rc::new(self.memory_mapping.copy().unwrap())),
         );
+        task.file_system_info = self.file_system_info.clone();
+        task.file_descriptor_table = self.file_descriptor_table.clone();
         task.thread.sp_el0 = SP_EL0.get();
         // copy the current thread context
         // the registers are stored in the stack in compiler generated function prologue

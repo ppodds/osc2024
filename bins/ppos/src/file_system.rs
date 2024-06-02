@@ -10,7 +10,8 @@ use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
 use file::FileOperation;
 use hashbrown::HashMap;
 use inode::INodeOperation;
-use library::{collections::fixed_size_table::FixedSizeTable, sync::mutex::Mutex};
+use library::{collections::fixed_size_table::FixedSizeTable, println, sync::mutex::Mutex};
+use vfs::file::{Umode, UMODE};
 
 use crate::scheduler::current;
 
@@ -315,28 +316,26 @@ pub fn init_root_file_system() -> Result<(), &'static str> {
     file_system_manager.register_file_system(tmpfs.clone())?;
     let ramfs = Rc::new(RamFS::new());
     file_system_manager.register_file_system(ramfs.clone())?;
-    let root = tmpfs.mount(
+    let root_mount = tmpfs.mount(
         Rc::downgrade(&tmpfs) as Weak<dyn FileSystemOperation>,
         "root",
     )?;
-    let initramfs = ramfs.mount(
+    let root = root_mount.root.upgrade().unwrap();
+    let initramfs_mount = ramfs.mount(
         Rc::downgrade(&ramfs) as Weak<dyn FileSystemOperation>,
         "initramfs",
     )?;
-    initramfs
-        .root
-        .upgrade()
-        .unwrap()
-        .set_name("initramfs".to_string());
-    let dentry = root.root.upgrade().unwrap().clone();
-    dentry.add_child(initramfs.root.clone());
-    initramfs
-        .root
-        .upgrade()
-        .unwrap()
-        .set_parent(Some(Rc::downgrade(&dentry)));
-    virtual_file_system().update_directory_entry("/", initramfs.root.upgrade().unwrap());
-    *file_system_manager.root.lock().unwrap() = Some(root);
+    let initramfs_root = initramfs_mount.root.upgrade().unwrap();
+    initramfs_root.set_name("initramfs".to_string());
+    root.add_child(initramfs_mount.root.clone());
+    initramfs_root.set_parent(Some(root_mount.root.clone()));
+    virtual_file_system().update_directory_entry("/", initramfs_root);
+    root.inode().upgrade().unwrap().mkdir(
+        Umode::new(UMODE::OWNER_READ::SET),
+        String::from("dev"),
+        Some(Rc::downgrade(&root)),
+    );
+    *file_system_manager.root.lock().unwrap() = Some(root_mount);
     Ok(())
 }
 
