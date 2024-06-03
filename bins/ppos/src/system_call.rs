@@ -6,8 +6,10 @@ mod exec;
 mod exit;
 mod fork;
 mod get_pid;
+mod ioctl;
 mod kill;
 mod kill_with_signal;
+mod lseek64;
 mod mbox_call;
 mod mkdir;
 mod mmap;
@@ -39,6 +41,8 @@ pub enum SystemCallNumber {
     MakeDirectory,
     Mount,
     ChangeDirectory,
+    LSeek64,
+    Ioctl,
 
     // internal use
     SignalReturn = 64,
@@ -65,6 +69,8 @@ impl From<u64> for SystemCallNumber {
             15 => SystemCallNumber::MakeDirectory,
             16 => SystemCallNumber::Mount,
             17 => SystemCallNumber::ChangeDirectory,
+            18 => SystemCallNumber::LSeek64,
+            19 => SystemCallNumber::Ioctl,
             64 => SystemCallNumber::SignalReturn,
             _ => panic!("unsupport system call number"),
         }
@@ -129,6 +135,12 @@ pub fn system_call(
             arg4 as *const (),
         ) as usize,
         SystemCallNumber::ChangeDirectory => chdir::chdir(arg0 as *const i8) as usize,
+        SystemCallNumber::LSeek64 => {
+            lseek64::lseek64(arg0 as i32, arg1 as i64, (arg2 as i32).into()) as usize
+        }
+        SystemCallNumber::Ioctl => {
+            ioctl::ioctl(arg0 as i32, arg1 as u64, arg2 as *const u8) as usize
+        }
         SystemCallNumber::SignalReturn => {
             sig_return::sig_return();
             0

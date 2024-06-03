@@ -449,7 +449,6 @@ impl MiniUartFile {
 
 impl FileOperation for MiniUartFile {
     fn write(&self, buf: &[u8], len: usize) -> Result<usize, &'static str> {
-        println!("write: {}", core::str::from_utf8(buf).unwrap());
         console().write_str(match core::str::from_utf8(buf) {
             Ok(s) => s,
             Err(_) => return Err("Invalid UTF-8 sequence"),
@@ -546,7 +545,7 @@ impl INodeOperation for MiniUartINode {
     }
 
     fn super_block(&self) -> Weak<dyn SuperBlockOperation> {
-        todo!()
+        self.inner.super_block()
     }
 }
 
@@ -557,20 +556,6 @@ impl DeviceDriver for MiniUart {
         let inner = self.inner.lock().unwrap();
         inner.init();
         *self.super_block.lock().unwrap() = Some(Rc::new(MiniUartSuperBlock::new()));
-        Ok(())
-    }
-
-    fn register_and_enable_interrupt_handler(
-        &'static self,
-        interrupt_number: &Self::InterruptNumberType,
-    ) -> Result<(), &'static str> {
-        let descriptor =
-            InterruptHandlerDescriptor::new(*interrupt_number, "mini uart", Some(self), self, 0);
-        interrupt_manager::interrupt_manager().register_handler(descriptor)?;
-        interrupt_manager::interrupt_manager().enable(interrupt_number);
-        let inner = self.inner.lock().unwrap();
-        inner.enable_read_interrupt();
-        inner.enable_write_interrupt();
         let dev_folder = virtual_file_system()
             .find_directory_entry(&Some(virtual_file_system().root().unwrap().root), "dev")
             .unwrap();
@@ -587,6 +572,20 @@ impl DeviceDriver for MiniUart {
         dev_folder.add_child(Rc::downgrade(
             &(mini_uart_dentry as Rc<dyn DirectoryEntryOperation>),
         ));
+        Ok(())
+    }
+
+    fn register_and_enable_interrupt_handler(
+        &'static self,
+        interrupt_number: &Self::InterruptNumberType,
+    ) -> Result<(), &'static str> {
+        let descriptor =
+            InterruptHandlerDescriptor::new(*interrupt_number, "mini uart", Some(self), self, 0);
+        interrupt_manager::interrupt_manager().register_handler(descriptor)?;
+        interrupt_manager::interrupt_manager().enable(interrupt_number);
+        let inner = self.inner.lock().unwrap();
+        inner.enable_read_interrupt();
+        inner.enable_write_interrupt();
         Ok(())
     }
 }
