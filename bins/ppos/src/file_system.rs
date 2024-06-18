@@ -7,6 +7,7 @@ use alloc::{
     vec::Vec,
 };
 use cpu::cpu::{disable_kernel_space_interrupt, enable_kernel_space_interrupt};
+use fat32::file_system::FAT32FS;
 use file::FileOperation;
 use hashbrown::HashMap;
 use inode::INodeOperation;
@@ -21,6 +22,7 @@ use self::{
 };
 
 pub mod directory_cache;
+pub mod fat32;
 pub mod file;
 pub mod file_descriptor;
 pub mod file_system;
@@ -316,6 +318,8 @@ pub fn init_root_file_system() -> Result<(), &'static str> {
     file_system_manager.register_file_system(tmpfs.clone())?;
     let ramfs = Rc::new(RamFS::new());
     file_system_manager.register_file_system(ramfs.clone())?;
+    let fat32 = Rc::new(FAT32FS::new());
+    file_system_manager.register_file_system(fat32.clone())?;
     let root_mount = tmpfs.mount(
         Rc::downgrade(&tmpfs) as Weak<dyn FileSystemOperation>,
         "root",
@@ -330,6 +334,15 @@ pub fn init_root_file_system() -> Result<(), &'static str> {
     root.add_child(initramfs_mount.root.clone());
     initramfs_root.set_parent(Some(root_mount.root.clone()));
     virtual_file_system().update_directory_entry("/", initramfs_root);
+    let fat32_mount = fat32.mount(
+        Rc::downgrade(&fat32) as Weak<dyn FileSystemOperation>,
+        "fat32",
+    )?;
+    // let fat32_root = fat32_mount.root.upgrade().unwrap();
+    // fat32_root.set_name("boot".to_string());
+    // root.add_child(fat32_mount.root.clone());
+    // fat32_root.set_parent(Some(root_mount.root.clone()));
+    // virtual_file_system().update_directory_entry("/", fat32_root);
     root.inode().upgrade().unwrap().mkdir(
         Umode::new(UMODE::OWNER_READ::SET),
         String::from("dev"),

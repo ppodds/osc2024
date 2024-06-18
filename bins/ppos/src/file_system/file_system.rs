@@ -23,6 +23,10 @@ pub trait FileSystemOperation: Debug + Any {
         &self,
         file_system: Weak<dyn FileSystemOperation>,
     ) -> Result<Box<dyn FileSystemContextOperation>, &'static str>;
+
+    fn add_super_block(&self, super_block: Rc<dyn SuperBlockOperation>);
+
+    fn get_super_block(&self, index: usize) -> Option<Rc<dyn SuperBlockOperation>>;
 }
 
 #[derive(Debug)]

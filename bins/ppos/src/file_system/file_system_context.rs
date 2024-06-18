@@ -8,6 +8,12 @@ use super::{directory_cache::DirectoryEntryOperation, file_system::FileSystemOpe
 pub trait FileSystemContextOperation: Debug + Any {
     /// Get or create the mountable root and superblock.
     fn get_tree(&self) -> Result<(), &'static str>;
+
+    fn set_root(&self, root: Weak<dyn DirectoryEntryOperation>);
+
+    fn root(&self) -> Option<Weak<dyn DirectoryEntryOperation>>;
+
+    fn file_system(&self) -> Weak<dyn FileSystemOperation>;
 }
 
 #[derive(Debug)]
@@ -16,23 +22,29 @@ pub struct FileSystemContext {
     file_system: Weak<dyn FileSystemOperation>,
 }
 
+impl FileSystemContextOperation for FileSystemContext {
+    fn get_tree(&self) -> Result<(), &'static str> {
+        unimplemented!()
+    }
+
+    fn set_root(&self, root: Weak<dyn DirectoryEntryOperation>) {
+        *self.root.lock().unwrap() = Some(root);
+    }
+
+    fn root(&self) -> Option<Weak<dyn DirectoryEntryOperation>> {
+        self.root.lock().unwrap().clone()
+    }
+
+    fn file_system(&self) -> Weak<dyn FileSystemOperation> {
+        self.file_system.clone()
+    }
+}
+
 impl FileSystemContext {
     pub const fn new(file_system: Weak<dyn FileSystemOperation>) -> Self {
         Self {
             root: Mutex::new(None),
             file_system,
         }
-    }
-
-    pub fn set_root(&self, root: Weak<dyn DirectoryEntryOperation>) {
-        *self.root.lock().unwrap() = Some(root);
-    }
-
-    pub fn root(&self) -> Option<Weak<dyn DirectoryEntryOperation>> {
-        self.root.lock().unwrap().clone()
-    }
-
-    pub fn file_system(&self) -> Weak<dyn FileSystemOperation> {
-        self.file_system.clone()
     }
 }

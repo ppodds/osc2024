@@ -7,5 +7,6 @@ pub mod local_interrupt_controller;
 pub mod mailbox;
 pub mod mini_uart;
 pub mod peripheral_ic;
+pub mod sdhost;
 pub mod timer;
 pub mod watchdog;

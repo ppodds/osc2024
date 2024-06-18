@@ -132,6 +132,18 @@ impl FileSystemContextOperation for RamFSContext {
 
         Ok(())
     }
+
+    fn set_root(&self, root: Weak<dyn DirectoryEntryOperation>) {
+        self.inner.set_root(root)
+    }
+
+    fn root(&self) -> Option<Weak<dyn DirectoryEntryOperation>> {
+        self.inner.root()
+    }
+
+    fn file_system(&self) -> Weak<dyn FileSystemOperation> {
+        self.inner.file_system()
+    }
 }
 
 #[derive(Debug)]
@@ -308,6 +320,14 @@ impl FileSystemOperation for RamFS {
         file_system: Weak<dyn FileSystemOperation>,
     ) -> Result<Box<dyn FileSystemContextOperation>, &'static str> {
         Ok(Box::new(RamFSContext::new(file_system)))
+    }
+
+    fn add_super_block(&self, super_block: Rc<dyn SuperBlockOperation>) {
+        self.inner.add_super_block(super_block)
+    }
+
+    fn get_super_block(&self, index: usize) -> Option<Rc<dyn SuperBlockOperation>> {
+        self.inner.get_super_block(index)
     }
 }
 

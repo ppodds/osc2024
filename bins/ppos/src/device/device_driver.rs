@@ -2,7 +2,7 @@ use library::sync::mutex::Mutex;
 
 use super::interrupt_controller::InterruptNumber;
 
-const MAX_DRIVER_NUM: usize = 6;
+const MAX_DRIVER_NUM: usize = 7;
 
 pub trait DeviceDriver {
     type InterruptNumberType: core::fmt::Display;
