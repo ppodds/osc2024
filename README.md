@@ -19,6 +19,8 @@ sudo apt install build-essential crossbuild-essential-arm64
 curl https://sh.rustup.rs -sSf | sh
 # Reload shell environment
 source "$HOME/.cargo/env"
+# Install build required tools
+cargo install cargo-binutils
 ```
 
 ## QEMU Install
