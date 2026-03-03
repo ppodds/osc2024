@@ -16,9 +16,7 @@ use crate::{
 
 use super::device_driver::DeviceDriver;
 use library::{
-    collections::ring_buffer::RingBuffer,
-    console::{self, ConsoleMode},
-    sync::mutex::Mutex,
+    console::{self, ConsoleMode}, sync::mutex::Mutex,
 };
 
 struct MiniUartInner {
@@ -26,6 +24,8 @@ struct MiniUartInner {
     read_buffer: VecDeque<u8>,
     write_buffer: VecDeque<u8>,
     mode: ConsoleMode,
+    receiver_has_valid_byte: bool,
+    writer_is_empty: bool,
 }
 
 pub struct MiniUart {
@@ -139,8 +139,6 @@ register_structs! {
 }
 
 impl MiniUartInner {
-    const BUFFER_SIZE: usize = 1024;
-
     /**
      * # Safety
      *
@@ -152,6 +150,8 @@ impl MiniUartInner {
             read_buffer: VecDeque::new(),
             write_buffer: VecDeque::new(),
             mode: ConsoleMode::Sync,
+            receiver_has_valid_byte: false,
+            writer_is_empty: false,
         }
     }
 
@@ -265,31 +265,28 @@ impl MiniUartInner {
     }
 
     fn handle_interrupt(&mut self) {
-        match self
-            .registers
-            .interrupt_identify
-            .read_as_enum(AUX_MU_IIR::INTERRUPT_ID_BITS)
-        {
-            Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::NO_INTERRUPT) => (),
-            Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::TRANSMIT_HOLDING_REGISTER_EMPTY) => {
-                // if nothing to write, disable write interrupt
-                // or it will keep firing and racing cpu
-                self.disable_write_interrupt();
-                if let Some(byte) = self.write_buffer.pop_front() {
-                    self.write_byte(byte);
-                    self.enable_write_interrupt();
-                }
+        if self.receiver_has_valid_byte {
+            let byte = self.read_byte();
+            self.read_buffer.push_back(byte);
+            self.receiver_has_valid_byte = false;
+            self.enable_read_interrupt();
+            return;
+        } else if self.writer_is_empty {
+            // if nothing to write, disable write interrupt
+            // or it will keep firing and racing cpu
+            self.disable_write_interrupt();
+            if let Some(byte) = self.write_buffer.pop_front() {
+                self.write_byte(byte);
+                self.writer_is_empty = false;
+                self.enable_write_interrupt();
             }
-            Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::RECEIVER_HOLDS_VAILD_BYTE) => {
-                self.disable_read_interrupt();
-                let byte = self.read_byte();
-                self.read_buffer.push_back(byte);
-                self.enable_read_interrupt();
-            }
-            None => panic!("Invalid interrupt"),
         }
     }
 
+    /**
+     * Before queuing the interrupt, we should disable the interrupt to avoid infinite interrupt issue. After handling the interrupt, we can enable the interrupt again.
+     * We use the object member to record the interrupt state to prevent the register state from being changed.
+     */
     fn interrupt_prehook(&mut self) {
         match self
             .registers
@@ -299,9 +296,11 @@ impl MiniUartInner {
             Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::NO_INTERRUPT) => (),
             Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::TRANSMIT_HOLDING_REGISTER_EMPTY) => {
                 self.disable_write_interrupt();
+                self.writer_is_empty = true;
             }
             Some(AUX_MU_IIR::INTERRUPT_ID_BITS::Value::RECEIVER_HOLDS_VAILD_BYTE) => {
                 self.disable_read_interrupt();
+                self.receiver_has_valid_byte = true;
             }
             None => panic!("Invalid interrupt"),
         }
